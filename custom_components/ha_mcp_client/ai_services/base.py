@@ -106,10 +106,6 @@ class AIServiceProvider(ABC):
         """
         pass
 
-    def _convert_tool_to_dict(self, tool: Tool) -> dict[str, Any]:
-        """Convert a Tool object to provider-specific format."""
-        return {
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.input_schema,
-        }
+    async def close(self) -> None:
+        """Close the AI service and clean up resources."""
+        pass

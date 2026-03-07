@@ -1,8 +1,13 @@
 """OpenAI AI Service Provider."""
 
+from __future__ import annotations
+
 import json
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
 from .base import (
     AIServiceProvider,
@@ -32,7 +37,7 @@ class OpenAIService(AIServiceProvider):
         """Return the name of the AI service."""
         return "OpenAI"
 
-    async def _get_client(self):
+    async def _get_client(self) -> AsyncOpenAI:
         """Get or create the OpenAI client."""
         if self._client is None:
             try:
@@ -93,8 +98,16 @@ class OpenAIService(AIServiceProvider):
 
             if message.tool_calls:
                 for tc in message.tool_calls:
-                    args = json.loads(tc.function.arguments)
-                    _LOGGER.info(
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except (json.JSONDecodeError, TypeError) as parse_err:
+                        _LOGGER.warning(
+                            "Failed to parse tool call arguments for %s: %s",
+                            tc.function.name,
+                            parse_err,
+                        )
+                        args = {}
+                    _LOGGER.debug(
                         "OpenAI tool call: %s with args: %s",
                         tc.function.name,
                         args,
@@ -140,6 +153,12 @@ class OpenAIService(AIServiceProvider):
         except Exception as e:
             _LOGGER.error("OpenAI validation failed: %s", e)
             return False
+
+    async def close(self) -> None:
+        """Close the OpenAI client."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
     def _convert_messages(
         self, messages: list[Message], system_prompt: str | None = None

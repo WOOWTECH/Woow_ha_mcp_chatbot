@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
@@ -11,6 +11,21 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import label_registry as lr
 
 _LOGGER = logging.getLogger(__name__)
+
+# Blocked domains/services to prevent destructive operations via AI tool calls
+BLOCKED_SERVICE_DOMAINS = frozenset({
+    "homeassistant",
+    "hassio",
+    "supervisor",
+    "config",
+    "system_log",
+})
+
+BLOCKED_SERVICES = frozenset({
+    ("recorder", "purge"),
+    ("recorder", "purge_entities"),
+    ("recorder", "disable"),
+})
 
 
 async def get_entity_state(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | None:
@@ -41,6 +56,20 @@ async def call_ha_service(
     target: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Call a Home Assistant service."""
+    # Security: block dangerous domains and services
+    if domain in BLOCKED_SERVICE_DOMAINS:
+        _LOGGER.warning("Blocked service call to restricted domain: %s.%s", domain, service)
+        return {
+            "success": False,
+            "error": f"Service domain '{domain}' is restricted for safety",
+        }
+    if (domain, service) in BLOCKED_SERVICES:
+        _LOGGER.warning("Blocked restricted service call: %s.%s", domain, service)
+        return {
+            "success": False,
+            "error": f"Service '{domain}.{service}' is restricted for safety",
+        }
+
     try:
         await hass.services.async_call(
             domain=domain,
@@ -265,12 +294,10 @@ async def get_history(
     from homeassistant.components.recorder.history import state_changes_during_period
 
     if start_time is None:
-        from datetime import timedelta
-
-        start_time = datetime.now() - timedelta(hours=24)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=24)
 
     if end_time is None:
-        end_time = datetime.now()
+        end_time = datetime.now(timezone.utc)
 
     try:
         recorder = get_instance(hass)
@@ -386,40 +413,18 @@ async def create_automation(
                 "message": f"設定驗證失敗：{str(e)}",
             }
 
-        # Get automation config component
+        # Create via the config websocket API
         from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
-
-        # Store the automation config
-        # We need to use the config/automation/config endpoint
-        from homeassistant.helpers import config_validation as cv
         from homeassistant.components.config import automation as config_automation
 
-        # Create via the config store
         if hasattr(config_automation, "async_create_item"):
             await config_automation.async_create_item(hass, config)
         else:
-            # Fallback: directly manipulate the config store
-            config_key = "core.config_entries"
-            store = hass.data.get("automation_config", {})
-
-            # Load existing automations
-            from homeassistant.helpers.storage import Store
-
-            automation_store = Store(hass, 1, "automations")
-            automations = await automation_store.async_load() or []
-
-            # Add new automation
-            automations.append(config)
-
-            # Save
-            await automation_store.async_save(automations)
-
-            # Reload automations
-            await hass.services.async_call(
-                AUTOMATION_DOMAIN,
-                "reload",
-                blocking=True,
-            )
+            return {
+                "success": False,
+                "error": "unsupported",
+                "message": "Automation creation API not available in this HA version",
+            }
 
         # Generate entity_id
         entity_id = f"automation.{alias.lower().replace(' ', '_').replace('-', '_')}"
@@ -468,26 +473,18 @@ async def create_script(
         if icon:
             config["icon"] = icon
 
-        # Use storage to save script
-        from homeassistant.helpers.storage import Store
+        # Create via the config websocket API
         from homeassistant.components.script import DOMAIN as SCRIPT_DOMAIN
+        from homeassistant.components.config import script as config_script
 
-        # Load existing scripts
-        script_store = Store(hass, 1, "scripts")
-        scripts = await script_store.async_load() or {}
-
-        # Add new script
-        scripts[script_id] = config
-
-        # Save
-        await script_store.async_save(scripts)
-
-        # Reload scripts
-        await hass.services.async_call(
-            SCRIPT_DOMAIN,
-            "reload",
-            blocking=True,
-        )
+        if hasattr(config_script, "async_create_item"):
+            await config_script.async_create_item(hass, {script_id: config})
+        else:
+            return {
+                "success": False,
+                "error": "unsupported",
+                "message": "Script creation API not available in this HA version",
+            }
 
         entity_id = f"script.{script_id}"
 

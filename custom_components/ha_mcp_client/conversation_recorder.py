@@ -10,7 +10,7 @@ from homeassistant.components.recorder import get_instance
 from homeassistant.helpers.event import async_track_time_interval
 
 from sqlalchemy import Column, String, Text, DateTime, Integer
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, Session
 
 from .const import (
     DOMAIN,
@@ -115,7 +115,7 @@ class ConversationRecorder:
 
     async def _record_message(self, data: dict[str, Any]) -> None:
         """Record a conversation message."""
-        _LOGGER.info("Recording message event received: user_id=%s", data.get("user_id"))
+        _LOGGER.debug("Recording message event received: user_id=%s", data.get("user_id"))
 
         if not self._enabled:
             _LOGGER.debug("Conversation history is disabled, skipping recording")
@@ -135,38 +135,36 @@ class ConversationRecorder:
 
         def _record():
             _LOGGER.debug("Executing database record operation")
-            with recorder.engine.connect() as conn:
-                from sqlalchemy.orm import Session
+            with Session(recorder.engine) as session:
+                # Record user message
+                if user_message:
+                    user_msg = ConversationMessage(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        timestamp=timestamp,
+                        role="user",
+                        content=user_message,
+                    )
+                    session.add(user_msg)
+                    _LOGGER.debug("Added user message to session")
 
-                with Session(conn) as session:
-                    # Record user message
-                    if user_message:
-                        user_msg = ConversationMessage(
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            timestamp=timestamp,
-                            role="user",
-                            content=user_message,
-                        )
-                        session.add(user_msg)
-                        _LOGGER.debug("Added user message to session")
+                # Record assistant message with a slight offset to preserve ordering
+                if assistant_message:
+                    assistant_timestamp = timestamp + timedelta(microseconds=1)
+                    assistant_msg = ConversationMessage(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        timestamp=assistant_timestamp,
+                        role="assistant",
+                        content=assistant_message,
+                        tool_calls=json.dumps(tool_calls) if tool_calls else None,
+                        tool_results=json.dumps(tool_results) if tool_results else None,
+                    )
+                    session.add(assistant_msg)
+                    _LOGGER.debug("Added assistant message to session")
 
-                    # Record assistant message
-                    if assistant_message:
-                        assistant_msg = ConversationMessage(
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            timestamp=timestamp,
-                            role="assistant",
-                            content=assistant_message,
-                            tool_calls=json.dumps(tool_calls) if tool_calls else None,
-                            tool_results=json.dumps(tool_results) if tool_results else None,
-                        )
-                        session.add(assistant_msg)
-                        _LOGGER.debug("Added assistant message to session")
-
-                    session.commit()
-                    _LOGGER.info("Successfully committed conversation to database")
+                session.commit()
+                _LOGGER.debug("Successfully committed conversation to database")
 
         try:
             await recorder.async_add_executor_job(_record)
@@ -182,17 +180,14 @@ class ConversationRecorder:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self._retention_days)
 
         def _cleanup():
-            with recorder.engine.connect() as conn:
-                from sqlalchemy.orm import Session
-
-                with Session(conn) as session:
-                    deleted = (
-                        session.query(ConversationMessage)
-                        .filter(ConversationMessage.timestamp < cutoff)
-                        .delete()
-                    )
-                    session.commit()
-                    return deleted
+            with Session(recorder.engine) as session:
+                deleted = (
+                    session.query(ConversationMessage)
+                    .filter(ConversationMessage.timestamp < cutoff)
+                    .delete()
+                )
+                session.commit()
+                return deleted
 
         try:
             deleted = await recorder.async_add_executor_job(_cleanup)
@@ -213,48 +208,54 @@ class ConversationRecorder:
         recorder = get_instance(self.hass)
 
         def _get_history():
-            with recorder.engine.connect() as conn:
-                from sqlalchemy.orm import Session
+            with Session(recorder.engine) as session:
+                query = session.query(ConversationMessage)
 
-                with Session(conn) as session:
-                    query = session.query(ConversationMessage)
+                if user_id:
+                    query = query.filter(ConversationMessage.user_id == user_id)
+                if conversation_id:
+                    query = query.filter(
+                        ConversationMessage.conversation_id == conversation_id
+                    )
+                if start_time:
+                    query = query.filter(ConversationMessage.timestamp >= start_time)
+                if end_time:
+                    query = query.filter(ConversationMessage.timestamp <= end_time)
 
-                    if user_id:
-                        query = query.filter(ConversationMessage.user_id == user_id)
-                    if conversation_id:
-                        query = query.filter(
-                            ConversationMessage.conversation_id == conversation_id
-                        )
-                    if start_time:
-                        query = query.filter(ConversationMessage.timestamp >= start_time)
-                    if end_time:
-                        query = query.filter(ConversationMessage.timestamp <= end_time)
+                query = query.order_by(ConversationMessage.timestamp.desc())
+                query = query.limit(limit)
 
-                    query = query.order_by(ConversationMessage.timestamp.desc())
-                    query = query.limit(limit)
+                results = []
+                for msg in query.all():
+                    # Safely parse JSON fields
+                    parsed_tool_calls = None
+                    if msg.tool_calls:
+                        try:
+                            parsed_tool_calls = json.loads(msg.tool_calls)
+                        except (json.JSONDecodeError, TypeError):
+                            _LOGGER.warning("Corrupt tool_calls JSON in record %d", msg.id)
 
-                    results = []
-                    for msg in query.all():
-                        results.append(
-                            {
-                                "id": msg.id,
-                                "user_id": msg.user_id,
-                                "conversation_id": msg.conversation_id,
-                                "timestamp": msg.timestamp.isoformat(),
-                                "role": msg.role,
-                                "content": msg.content,
-                                "tool_calls": (
-                                    json.loads(msg.tool_calls) if msg.tool_calls else None
-                                ),
-                                "tool_results": (
-                                    json.loads(msg.tool_results)
-                                    if msg.tool_results
-                                    else None
-                                ),
-                            }
-                        )
+                    parsed_tool_results = None
+                    if msg.tool_results:
+                        try:
+                            parsed_tool_results = json.loads(msg.tool_results)
+                        except (json.JSONDecodeError, TypeError):
+                            _LOGGER.warning("Corrupt tool_results JSON in record %d", msg.id)
 
-                    return results
+                    results.append(
+                        {
+                            "id": msg.id,
+                            "user_id": msg.user_id,
+                            "conversation_id": msg.conversation_id,
+                            "timestamp": msg.timestamp.isoformat(),
+                            "role": msg.role,
+                            "content": msg.content,
+                            "tool_calls": parsed_tool_calls,
+                            "tool_results": parsed_tool_results,
+                        }
+                    )
+
+                return results
 
         try:
             return await recorder.async_add_executor_job(_get_history)
@@ -267,26 +268,31 @@ class ConversationRecorder:
         user_id: str | None = None,
         conversation_id: str | None = None,
     ) -> int:
-        """Clear conversation history."""
+        """Clear conversation history.
+
+        At least one of user_id or conversation_id must be provided
+        to prevent accidental deletion of all records.
+        """
+        if not user_id and not conversation_id:
+            _LOGGER.error("clear_conversation_history called without user_id or conversation_id")
+            return 0
+
         recorder = get_instance(self.hass)
 
         def _clear():
-            with recorder.engine.connect() as conn:
-                from sqlalchemy.orm import Session
+            with Session(recorder.engine) as session:
+                query = session.query(ConversationMessage)
 
-                with Session(conn) as session:
-                    query = session.query(ConversationMessage)
+                if user_id:
+                    query = query.filter(ConversationMessage.user_id == user_id)
+                if conversation_id:
+                    query = query.filter(
+                        ConversationMessage.conversation_id == conversation_id
+                    )
 
-                    if user_id:
-                        query = query.filter(ConversationMessage.user_id == user_id)
-                    if conversation_id:
-                        query = query.filter(
-                            ConversationMessage.conversation_id == conversation_id
-                        )
-
-                    deleted = query.delete()
-                    session.commit()
-                    return deleted
+                deleted = query.delete()
+                session.commit()
+                return deleted
 
         try:
             return await recorder.async_add_executor_job(_clear)
@@ -301,7 +307,7 @@ class ConversationRecorder:
     ) -> str:
         """Export conversation history."""
         history = await self.get_conversation_history(
-            user_id=user_id, limit=10000
+            user_id=user_id, limit=1000
         )
 
         if format == "json":

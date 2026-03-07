@@ -13,8 +13,6 @@ from .const import (
     DOMAIN,
     CONF_ENABLE_MCP_SERVER,
     CONF_ENABLE_CONVERSATION,
-    CONF_MCP_SERVER_PORT,
-    DEFAULT_MCP_SERVER_PORT,
     SERVICE_CLEAR_HISTORY,
     SERVICE_EXPORT_HISTORY,
     ATTR_USER_ID,
@@ -42,33 +40,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "enable_conversation": entry.data.get(CONF_ENABLE_CONVERSATION, True),
     }
 
-    # Setup MCP Server if enabled (shares tool_registry)
-    if data["enable_mcp_server"]:
-        port = entry.data.get(CONF_MCP_SERVER_PORT, DEFAULT_MCP_SERVER_PORT)
-        mcp_server = MCPServer(hass, port=port, tool_registry=tool_registry)
-        await mcp_server.start()
-        data["mcp_server"] = mcp_server
+    try:
+        # Setup MCP Server if enabled (shares tool_registry)
+        if data["enable_mcp_server"]:
+            mcp_server = MCPServer(hass, tool_registry=tool_registry)
+            await mcp_server.start()
+            data["mcp_server"] = mcp_server
 
-    # Setup Conversation Recorder
-    _LOGGER.info("Setting up Conversation Recorder for entry %s", entry.entry_id)
-    recorder = ConversationRecorder(hass, entry.data)
-    await recorder.async_setup()
-    data["recorder"] = recorder
-    _LOGGER.info("Conversation Recorder setup complete, stored in data['recorder']")
+        # Setup Conversation Recorder
+        _LOGGER.debug("Setting up Conversation Recorder for entry %s", entry.entry_id)
+        recorder = ConversationRecorder(hass, entry.data)
+        await recorder.async_setup()
+        data["recorder"] = recorder
 
-    hass.data[DOMAIN][entry.entry_id] = data
+        hass.data[DOMAIN][entry.entry_id] = data
 
-    # Setup platforms
-    if data["enable_conversation"]:
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Setup platforms
+        if data["enable_conversation"]:
+            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register services
-    await _async_register_services(hass, recorder)
+        # Register services
+        await _async_register_services(hass)
 
-    # Listen for options updates
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+        # Listen for options updates
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
 
-    return True
+        return True
+
+    except Exception:
+        # Clean up anything that was already started
+        if "mcp_server" in data:
+            await data["mcp_server"].stop()
+        if "recorder" in data:
+            await data["recorder"].async_unload()
+        raise
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -103,13 +108,20 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def _async_register_services(
-    hass: HomeAssistant, recorder: ConversationRecorder
-) -> None:
+def _get_recorder(hass: HomeAssistant) -> ConversationRecorder:
+    """Get the first available recorder from any entry."""
+    for entry_data in hass.data.get(DOMAIN, {}).values():
+        if isinstance(entry_data, dict) and "recorder" in entry_data:
+            return entry_data["recorder"]
+    raise HomeAssistantError("No conversation recorder available")
+
+
+async def _async_register_services(hass: HomeAssistant) -> None:
     """Register integration services."""
 
     async def handle_clear_history(call: ServiceCall) -> None:
         """Handle clear history service call."""
+        recorder = _get_recorder(hass)
         user_id = call.data.get(ATTR_USER_ID)
         caller_user_id = call.context.user_id
 
@@ -133,6 +145,7 @@ async def _async_register_services(
 
     async def handle_export_history(call: ServiceCall) -> dict[str, Any]:
         """Handle export history service call."""
+        recorder = _get_recorder(hass)
         user_id = call.data.get(ATTR_USER_ID)
         format_type = call.data.get("format", "json")
         caller_user_id = call.context.user_id

@@ -376,6 +376,9 @@ class HAMCPClientOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             # Merge with existing data and options
             new_data = {**self.config_entry.data}
+            # Preserve existing API key if not provided in update
+            if not user_input.get(CONF_API_KEY):
+                user_input.pop(CONF_API_KEY, None)
             new_data.update(user_input)
 
             # Update config entry data
@@ -408,7 +411,6 @@ class HAMCPClientOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Optional(
                         CONF_API_KEY,
-                        description={"suggested_value": current.get(CONF_API_KEY, "")},
                     ): TextSelector(
                         TextSelectorConfig(type=TextSelectorType.PASSWORD)
                     ),

@@ -909,13 +909,32 @@ NEVER call create_scene without the 'entities' parameter!""",
         if tool is None:
             raise ValueError(f"Unknown tool: {name}")
 
-        _LOGGER.info("Executing tool %s with args: %s", name, arguments)
+        _LOGGER.debug("Executing tool %s with args: %s", name, arguments)
         try:
-            result = await tool.handler(**arguments)
-            _LOGGER.info("Tool %s executed successfully, result: %s", name, result)
+            # Filter arguments to only include expected handler parameters
+            import inspect
+            sig = inspect.signature(tool.handler)
+            valid_params = set(sig.parameters.keys()) - {"self"}
+            has_var_keyword = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD
+                for p in sig.parameters.values()
+            )
+            if has_var_keyword:
+                filtered_args = arguments
+            else:
+                filtered_args = {k: v for k, v in arguments.items() if k in valid_params}
+                dropped = set(arguments.keys()) - valid_params
+                if dropped:
+                    _LOGGER.warning("Tool %s: dropped unexpected arguments: %s", name, dropped)
+
+            result = await tool.handler(**filtered_args)
+            _LOGGER.debug("Tool %s executed successfully", name)
             return result
+        except TypeError as te:
+            _LOGGER.error("Tool %s argument error: %s", name, te)
+            return {"error": f"Invalid arguments for tool '{name}': {te}"}
         except Exception as e:
-            _LOGGER.error("Error executing tool %s: %s (args were: %s)", name, e, arguments)
+            _LOGGER.error("Error executing tool %s: %s", name, e)
             raise
 
     # Tool Handlers
@@ -1202,9 +1221,9 @@ NEVER call create_scene without the 'entities' parameter!""",
         self, entity_id: str, hours: int = 24, limit: int = 100
     ) -> list[dict[str, Any]]:
         """Handle get_history tool."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        start_time = datetime.now() - timedelta(hours=hours)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await get_history(self.hass, entity_id, start_time, None, limit)
 
     async def _handle_system_overview(self) -> dict[str, Any]:

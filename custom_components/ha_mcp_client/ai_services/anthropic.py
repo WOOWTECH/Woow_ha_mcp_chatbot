@@ -1,7 +1,12 @@
 """Anthropic Claude AI Service Provider."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
 
 from .base import (
     AIServiceProvider,
@@ -30,7 +35,7 @@ class AnthropicService(AIServiceProvider):
         """Return the name of the AI service."""
         return "Anthropic Claude"
 
-    async def _get_client(self):
+    async def _get_client(self) -> AsyncAnthropic:
         """Get or create the Anthropic client."""
         if self._client is None:
             try:
@@ -71,12 +76,12 @@ class AnthropicService(AIServiceProvider):
             response = await client.messages.create(**params)
 
             # Parse response
-            content = ""
+            text_parts = []
             tool_calls = []
 
             for block in response.content:
                 if block.type == "text":
-                    content = block.text
+                    text_parts.append(block.text)
                 elif block.type == "tool_use":
                     tool_calls.append(
                         ToolCall(
@@ -85,6 +90,8 @@ class AnthropicService(AIServiceProvider):
                             arguments=block.input,
                         )
                     )
+
+            content = "\n".join(text_parts)
 
             return AIResponse(
                 content=content,
@@ -117,6 +124,12 @@ class AnthropicService(AIServiceProvider):
         except Exception as e:
             _LOGGER.error("Anthropic validation failed: %s", e)
             return False
+
+    async def close(self) -> None:
+        """Close the Anthropic client."""
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
         """Convert messages to Anthropic format."""

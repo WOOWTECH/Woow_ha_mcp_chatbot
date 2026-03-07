@@ -183,7 +183,7 @@ class HAMCPConversationEntity(ConversationEntity):
         )
         # Always append the resource creation addon to ensure proper behavior
         system_prompt = base_system_prompt + SYSTEM_PROMPT_ADDON
-        _LOGGER.info(
+        _LOGGER.debug(
             "System prompt length: base=%d, addon=%d, total=%d",
             len(base_system_prompt),
             len(SYSTEM_PROMPT_ADDON),
@@ -223,9 +223,12 @@ class HAMCPConversationEntity(ConversationEntity):
             )
 
         except Exception as e:
-            _LOGGER.error("Error processing conversation: %s", e)
+            _LOGGER.error("Error processing conversation: %s", e, exc_info=True)
             response = IntentResponse(language=user_input.language)
-            response.async_set_speech(f"Error: {str(e)}")
+            response.async_set_speech(
+                "Sorry, an error occurred while processing your request. "
+                "Please check the logs for details."
+            )
             return ConversationResult(
                 response=response,
                 conversation_id=conversation_id,
@@ -350,7 +353,7 @@ class HAMCPConversationEntity(ConversationEntity):
         """Load conversation history from recorder for a user."""
         try:
             # Get recorder instance
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Loading history for user %s, entry_id=%s",
                 user_id,
                 self._config_entry.entry_id,
@@ -390,11 +393,10 @@ class HAMCPConversationEntity(ConversationEntity):
             # We need chronological order (oldest first) for conversation context
             messages.reverse()
 
-            _LOGGER.info(
-                "Loaded %d messages from history for user %s: %s",
+            _LOGGER.debug(
+                "Loaded %d messages from history for user %s",
                 len(messages),
                 user_id,
-                [f"{m.role}:{m.content[:50]}..." for m in messages] if messages else "[]",
             )
             return messages
 
@@ -415,8 +417,7 @@ class HAMCPConversationEntity(ConversationEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Clean up when entity is removed."""
-        # Close AI service client if it has a close method
-        if self._ai_service and hasattr(self._ai_service, "close"):
+        if self._ai_service:
             try:
                 await self._ai_service.close()
             except Exception as e:

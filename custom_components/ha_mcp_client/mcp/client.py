@@ -28,6 +28,7 @@ class MCPClient:
         self._resources: list[dict[str, Any]] = []
         self._connected = False
         self._sse_task: asyncio.Task | None = None
+        self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -199,7 +200,7 @@ class MCPClient:
         """Handle incoming SSE message."""
         # Store response for pending requests
         msg_id = message.get("id")
-        if msg_id and hasattr(self, "_pending_requests"):
+        if msg_id:
             future = self._pending_requests.get(msg_id)
             if future and not future.done():
                 future.set_result(message)
@@ -220,10 +221,7 @@ class MCPClient:
         }
 
         # Setup response future
-        if not hasattr(self, "_pending_requests"):
-            self._pending_requests: dict[str, asyncio.Future] = {}
-
-        future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
+        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending_requests[msg_id] = future
 
         try:

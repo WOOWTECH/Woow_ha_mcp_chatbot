@@ -19,37 +19,41 @@ _LOGGER = logging.getLogger(__name__)
 # MCP Protocol version
 MCP_PROTOCOL_VERSION = "2024-11-05"
 
+# Session limits
+MAX_SESSIONS = 50
+MAX_QUEUE_SIZE = 100
+
 
 class MCPServer:
     """MCP Server implementation using SSE transport.
 
     Note: The MCP server uses Home Assistant's built-in HTTP server.
-    The port parameter is stored for documentation purposes but the actual
-    endpoint is available at /api/ha_mcp_client/sse on HA's HTTP port.
+    The endpoint is available at /api/ha_mcp_client/sse on HA's HTTP port.
     """
 
     def __init__(
         self,
         hass: HomeAssistant,
-        port: int = 8087,
         tool_registry: "ToolRegistry | None" = None,
     ) -> None:
         """Initialize the MCP server."""
         self.hass = hass
-        self.port = port  # Stored for reference, actual endpoint uses HA's HTTP port
         # Use provided tool_registry or create a new one
         self.tool_registry = tool_registry if tool_registry is not None else ToolRegistry(hass)
         self._sessions: dict[str, "MCPSession"] = {}
         self._running = False
+        self._views_registered = False
 
     async def start(self) -> None:
         """Start the MCP server."""
         if self._running:
             return
 
-        # Register HTTP views
-        self.hass.http.register_view(MCPSSEView(self))
-        self.hass.http.register_view(MCPMessageView(self))
+        # Only register HTTP views once to avoid route conflicts on reload
+        if not self._views_registered:
+            self.hass.http.register_view(MCPSSEView(self))
+            self.hass.http.register_view(MCPMessageView(self))
+            self._views_registered = True
 
         self._running = True
         _LOGGER.info(
@@ -67,9 +71,12 @@ class MCPServer:
 
         _LOGGER.info("MCP Server stopped")
 
-    def create_session(self) -> "MCPSession":
+    def create_session(self, user_id: str | None = None) -> "MCPSession":
         """Create a new MCP session."""
-        session = MCPSession(self)
+        if len(self._sessions) >= MAX_SESSIONS:
+            raise web.HTTPTooManyRequests(text="Too many active MCP sessions")
+
+        session = MCPSession(self, user_id=user_id)
         self._sessions[session.session_id] = session
         return session
 
@@ -99,18 +106,24 @@ class MCPServer:
 class MCPSession:
     """Represents an MCP session."""
 
-    def __init__(self, server: MCPServer) -> None:
+    def __init__(self, server: MCPServer, user_id: str | None = None) -> None:
         """Initialize the session."""
         self.server = server
         self.session_id = str(uuid.uuid4())
-        self._message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.user_id = user_id
+        self._message_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=MAX_QUEUE_SIZE
+        )
         self._closed = False
         self._initialized = False
 
     async def send_message(self, message: dict[str, Any]) -> None:
         """Send a message to the client."""
         if not self._closed:
-            await self._message_queue.put(message)
+            try:
+                self._message_queue.put_nowait(message)
+            except asyncio.QueueFull:
+                _LOGGER.warning("MCP session %s: message queue full, dropping message", self.session_id)
 
     async def receive_message(self) -> dict[str, Any] | None:
         """Receive a message from the queue."""
@@ -123,24 +136,38 @@ class MCPSession:
 
     async def handle_message(self, message: dict[str, Any]) -> dict[str, Any] | None:
         """Handle an incoming MCP message."""
+        # Validate JSON-RPC 2.0 format
+        if message.get("jsonrpc") != "2.0":
+            return self._error_response(
+                message.get("id"), -32600, "Invalid Request: missing jsonrpc 2.0"
+            )
+
         method = message.get("method")
         msg_id = message.get("id")
         params = message.get("params", {})
 
         _LOGGER.debug("Received MCP message: %s", method)
 
+        # Allow initialize and ping without prior initialization
         if method == "initialize":
             return await self._handle_initialize(msg_id, params)
         elif method == "initialized":
             return await self._handle_initialized(msg_id)
-        elif method == "tools/list":
+        elif method == "ping":
+            return await self._handle_ping(msg_id)
+
+        # All other methods require initialization
+        if not self._initialized:
+            return self._error_response(
+                msg_id, -32600, "Session not initialized. Send 'initialize' first."
+            )
+
+        if method == "tools/list":
             return await self._handle_tools_list(msg_id)
         elif method == "tools/call":
             return await self._handle_tools_call(msg_id, params)
         elif method == "resources/list":
             return await self._handle_resources_list(msg_id)
-        elif method == "ping":
-            return await self._handle_ping(msg_id)
         else:
             return self._error_response(msg_id, -32601, f"Unknown method: {method}")
 
@@ -149,11 +176,22 @@ class MCPSession:
     ) -> dict[str, Any]:
         """Handle initialize request."""
         client_info = params.get("clientInfo", {})
+        client_version = params.get("protocolVersion", "")
+
         _LOGGER.info(
-            "MCP client connected: %s %s",
+            "MCP client connected: %s %s (protocol: %s)",
             client_info.get("name", "Unknown"),
             client_info.get("version", ""),
+            client_version,
         )
+
+        # Validate protocol version compatibility
+        if client_version and client_version != MCP_PROTOCOL_VERSION:
+            _LOGGER.warning(
+                "Client protocol version %s differs from server %s",
+                client_version,
+                MCP_PROTOCOL_VERSION,
+            )
 
         return {
             "jsonrpc": "2.0",
@@ -197,9 +235,7 @@ class MCPSession:
             result = await self.server.tool_registry.execute(tool_name, arguments)
 
             # Convert result to content format
-            if isinstance(result, dict):
-                content_text = json.dumps(result, indent=2, default=str)
-            elif isinstance(result, list):
+            if isinstance(result, (dict, list)):
                 content_text = json.dumps(result, indent=2, default=str)
             else:
                 content_text = str(result)
@@ -268,7 +304,15 @@ class MCPSSEView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.StreamResponse:
         """Handle SSE connection."""
-        session = self.server.create_session()
+        # Extract authenticated user ID from request
+        user_id = None
+        if hasattr(request, "user") and request.get("hass_user"):
+            user_id = request["hass_user"].id
+
+        try:
+            session = self.server.create_session(user_id=user_id)
+        except web.HTTPTooManyRequests:
+            return web.Response(status=429, text="Too many active sessions")
 
         response = web.StreamResponse(
             status=200,
@@ -295,9 +339,13 @@ class MCPSSEView(HomeAssistantView):
                     data = json.dumps(message)
                     await response.write(f"event: message\ndata: {data}\n\n".encode())
                 else:
-                    # Send keepalive
-                    await response.write(b": keepalive\n\n")
-        except asyncio.CancelledError:
+                    # Send keepalive only if session is still open
+                    if not session._closed:
+                        try:
+                            await response.write(b": keepalive\n\n")
+                        except ConnectionResetError:
+                            break
+        except (asyncio.CancelledError, ConnectionResetError):
             pass
         finally:
             self.server.remove_session(session.session_id)
@@ -326,9 +374,17 @@ class MCPMessageView(HomeAssistantView):
         if session is None:
             return web.Response(status=404, text="Session not found")
 
+        # Verify that the requesting user matches the session owner
+        if session.user_id is not None:
+            request_user_id = None
+            if request.get("hass_user"):
+                request_user_id = request["hass_user"].id
+            if request_user_id != session.user_id:
+                return web.Response(status=403, text="Forbidden: session belongs to another user")
+
         try:
             message = await request.json()
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, Exception):
             return web.Response(status=400, text="Invalid JSON")
 
         # Handle the message
