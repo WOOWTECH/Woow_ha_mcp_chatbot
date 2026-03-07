@@ -1,0 +1,33 @@
+clear_conversation_history:
+  name: Clear Conversation History
+  description: Clear conversation history for a user
+  fields:
+    user_id:
+      name: User ID
+      description: The Home Assistant user ID (leave empty for current user)
+      required: false
+      example: "abc123"
+      selector:
+        text:
+
+export_conversation_history:
+  name: Export Conversation History
+  description: Export conversation history to a file
+  fields:
+    user_id:
+      name: User ID
+      description: The Home Assistant user ID (leave empty for current user)
+      required: false
+      example: "abc123"
+      selector:
+        text:
+    format:
+      name: Format
+      description: Export format
+      required: false
+      default: json
+      selector:
+        select:
+          options:
+            - json
+            - markdown

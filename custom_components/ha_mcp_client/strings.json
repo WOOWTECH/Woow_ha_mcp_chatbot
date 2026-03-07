@@ -1,0 +1,115 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA MCP Client Setup",
+        "description": "Configure your HA MCP Client integration",
+        "data": {
+          "enable_mcp_server": "Enable MCP Server (expose tools to external AI clients)",
+          "enable_conversation": "Enable Conversation Entity (built-in AI chatbot)"
+        }
+      },
+      "mcp_server": {
+        "title": "MCP Server Configuration",
+        "description": "Configure the MCP SSE server for external AI clients",
+        "data": {
+          "mcp_server_port": "SSE Server Port"
+        }
+      },
+      "ai_service": {
+        "title": "AI Service Configuration",
+        "description": "Select and configure your AI service provider",
+        "data": {
+          "ai_service": "AI Service Provider",
+          "api_key": "API Key",
+          "model": "Model",
+          "base_url": "Base URL (for OpenAI compatible services)",
+          "ollama_host": "Ollama Host URL"
+        }
+      },
+      "conversation_settings": {
+        "title": "Conversation Settings",
+        "description": "Configure conversation behavior and history",
+        "data": {
+          "enable_conversation_history": "Enable conversation history",
+          "history_retention_days": "History retention (days)",
+          "system_prompt": "System prompt (customize AI behavior)",
+          "max_tool_calls": "Maximum tool calls per message"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Invalid API key. Please check and try again.",
+      "connection_failed": "Failed to connect to the AI service.",
+      "invalid_port": "Invalid port number. Must be between 1024 and 65535.",
+      "ollama_not_reachable": "Cannot reach Ollama server at the specified host."
+    },
+    "abort": {
+      "already_configured": "HA MCP Client is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA MCP Client Settings",
+        "description": "Current configuration:\n- **AI Provider**: {current_ai}\n- **Model**: {current_model}\n\nSelect a category below to modify settings:",
+        "data": {
+          "menu_option": "Configuration Category"
+        }
+      },
+      "ai_service": {
+        "title": "AI Service Configuration",
+        "description": "Configure your AI service provider and model",
+        "data": {
+          "ai_service": "AI Service Provider",
+          "api_key": "API Key",
+          "model": "Model",
+          "base_url": "Base URL (for OpenAI compatible)",
+          "ollama_host": "Ollama Host URL"
+        }
+      },
+      "conversation_settings": {
+        "title": "Conversation Settings",
+        "description": "Configure conversation history and retention",
+        "data": {
+          "enable_conversation_history": "Enable conversation history",
+          "history_retention_days": "History retention (days)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced Settings",
+        "description": "Configure advanced options",
+        "data": {
+          "system_prompt": "System prompt (customize AI behavior)",
+          "max_tool_calls": "Maximum tool calls per message"
+        }
+      }
+    }
+  },
+  "services": {
+    "clear_conversation_history": {
+      "name": "Clear Conversation History",
+      "description": "Clear conversation history for a user",
+      "fields": {
+        "user_id": {
+          "name": "User ID",
+          "description": "The Home Assistant user ID (leave empty for current user)"
+        }
+      }
+    },
+    "export_conversation_history": {
+      "name": "Export Conversation History",
+      "description": "Export conversation history to a file",
+      "fields": {
+        "user_id": {
+          "name": "User ID",
+          "description": "The Home Assistant user ID (leave empty for current user)"
+        },
+        "format": {
+          "name": "Format",
+          "description": "Export format (json or markdown)"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,196 @@
+"""OpenAI AI Service Provider."""
+
+import json
+import logging
+from typing import Any
+
+from .base import (
+    AIServiceProvider,
+    AIResponse,
+    Message,
+    MessageRole,
+    Tool,
+    ToolCall,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class OpenAIService(AIServiceProvider):
+    """OpenAI AI service provider."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        """Initialize OpenAI service."""
+        super().__init__(config)
+        self._client = None
+        self._api_key = config.get("api_key", "")
+        self._model = config.get("model", "gpt-4-turbo")
+        self._base_url = config.get("base_url")
+
+    @property
+    def name(self) -> str:
+        """Return the name of the AI service."""
+        return "OpenAI"
+
+    async def _get_client(self):
+        """Get or create the OpenAI client."""
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+
+                kwargs: dict[str, Any] = {"api_key": self._api_key}
+                if self._base_url:
+                    kwargs["base_url"] = self._base_url
+
+                self._client = AsyncOpenAI(**kwargs)
+            except ImportError:
+                _LOGGER.error("openai package not installed")
+                raise
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[Message],
+        tools: list[Tool] | None = None,
+        system_prompt: str | None = None,
+    ) -> AIResponse:
+        """Send a chat request to OpenAI."""
+        client = await self._get_client()
+
+        # Convert messages to OpenAI format
+        openai_messages = self._convert_messages(messages, system_prompt)
+
+        # Debug logging
+        _LOGGER.debug(
+            "OpenAI request - model: %s, system_prompt_len: %d, messages: %d, tools: %d",
+            self._model,
+            len(system_prompt) if system_prompt else 0,
+            len(openai_messages),
+            len(tools) if tools else 0,
+        )
+        if system_prompt:
+            _LOGGER.debug("System prompt preview: %s...", system_prompt[:500])
+
+        # Build request parameters
+        params: dict[str, Any] = {
+            "model": self._model,
+            "messages": openai_messages,
+        }
+
+        if tools:
+            params["tools"] = [self._convert_tool_to_openai(t) for t in tools]
+            params["tool_choice"] = "auto"
+
+        try:
+            response = await client.chat.completions.create(**params)
+
+            # Parse response
+            choice = response.choices[0]
+            message = choice.message
+
+            content = message.content or ""
+            tool_calls = []
+
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    args = json.loads(tc.function.arguments)
+                    _LOGGER.info(
+                        "OpenAI tool call: %s with args: %s",
+                        tc.function.name,
+                        args,
+                    )
+                    tool_calls.append(
+                        ToolCall(
+                            id=tc.id,
+                            name=tc.function.name,
+                            arguments=args,
+                        )
+                    )
+
+            return AIResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=choice.finish_reason or "stop",
+                usage={
+                    "input_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.completion_tokens,
+                }
+                if response.usage
+                else None,
+            )
+
+        except Exception as e:
+            _LOGGER.error("Error calling OpenAI API: %s", e)
+            raise
+
+    async def validate_config(self) -> bool:
+        """Validate the OpenAI configuration."""
+        if not self._api_key:
+            return False
+
+        try:
+            client = await self._get_client()
+            # Make a minimal API call to validate
+            await client.chat.completions.create(
+                model=self._model,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "test"}],
+            )
+            return True
+        except Exception as e:
+            _LOGGER.error("OpenAI validation failed: %s", e)
+            return False
+
+    def _convert_messages(
+        self, messages: list[Message], system_prompt: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Convert messages to OpenAI format."""
+        openai_messages = []
+
+        if system_prompt:
+            openai_messages.append({"role": "system", "content": system_prompt})
+
+        for msg in messages:
+            if msg.role == MessageRole.SYSTEM:
+                openai_messages.append({"role": "system", "content": msg.content})
+            elif msg.role == MessageRole.USER:
+                openai_messages.append({"role": "user", "content": msg.content})
+            elif msg.role == MessageRole.ASSISTANT:
+                openai_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": msg.content,
+                }
+                if msg.tool_calls:
+                    openai_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments),
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ]
+                openai_messages.append(openai_msg)
+            elif msg.role == MessageRole.TOOL:
+                openai_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": msg.content,
+                    }
+                )
+
+        return openai_messages
+
+    def _convert_tool_to_openai(self, tool: Tool) -> dict[str, Any]:
+        """Convert a Tool to OpenAI format."""
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
+            },
+        }

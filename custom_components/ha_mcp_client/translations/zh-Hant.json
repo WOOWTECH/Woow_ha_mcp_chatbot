@@ -1,0 +1,123 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA MCP Client \u8a2d\u5b9a",
+        "description": "\u8a2d\u5b9a\u4f60\u7684 HA MCP Client \u6574\u5408",
+        "data": {
+          "enable_mcp_server": "\u555f\u7528 MCP \u4f3a\u670d\u5668\uff08\u63d0\u4f9b\u5de5\u5177\u7d66\u5916\u90e8 AI \u5ba2\u6236\u7aef\uff09",
+          "enable_conversation": "\u555f\u7528\u5c0d\u8a71\u6a5f\u5668\u4eba\uff08\u5167\u5efa AI \u804a\u5929\uff09"
+        }
+      },
+      "mcp_server": {
+        "title": "MCP \u4f3a\u670d\u5668\u8a2d\u5b9a",
+        "description": "\u8a2d\u5b9a\u7d66\u5916\u90e8 AI \u5ba2\u6236\u7aef\u4f7f\u7528\u7684 MCP SSE \u4f3a\u670d\u5668",
+        "data": {
+          "mcp_server_port": "SSE \u4f3a\u670d\u5668\u57e0"
+        }
+      },
+      "ai_service": {
+        "title": "AI \u670d\u52d9\u8a2d\u5b9a",
+        "description": "\u9078\u64c7\u4e26\u8a2d\u5b9a\u4f60\u7684 AI \u670d\u52d9\u63d0\u4f9b\u8005",
+        "data": {
+          "ai_service": "AI \u670d\u52d9\u63d0\u4f9b\u8005",
+          "api_key": "API \u91d1\u9470",
+          "model": "\u6a21\u578b",
+          "base_url": "Base URL\uff08\u7528\u65bc OpenAI \u76f8\u5bb9\u670d\u52d9\uff09",
+          "ollama_host": "Ollama \u4e3b\u6a5f URL"
+        }
+      },
+      "conversation_settings": {
+        "title": "\u5c0d\u8a71\u8a2d\u5b9a",
+        "description": "\u8a2d\u5b9a\u5c0d\u8a71\u884c\u70ba\u548c\u6b77\u53f2\u7d00\u9304",
+        "data": {
+          "enable_conversation_history": "\u555f\u7528\u5c0d\u8a71\u7d00\u9304",
+          "history_retention_days": "\u7d00\u9304\u4fdd\u7559\u5929\u6578",
+          "system_prompt": "\u7cfb\u7d71\u63d0\u793a\u8a5e\uff08\u81ea\u8a02 AI \u884c\u70ba\uff09",
+          "max_tool_calls": "\u6bcf\u5247\u8a0a\u606f\u6700\u5927\u5de5\u5177\u547c\u53eb\u6b21\u6578"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "API \u91d1\u9470\u7121\u6548\u3002\u8acb\u6aa2\u67e5\u5f8c\u91cd\u8a66\u3002",
+      "connection_failed": "\u7121\u6cd5\u9023\u63a5\u5230 AI \u670d\u52d9\u3002",
+      "invalid_port": "\u57e0\u865f\u7121\u6548\u3002\u5fc5\u9808\u5728 1024 \u5230 65535 \u4e4b\u9593\u3002",
+      "ollama_not_reachable": "\u7121\u6cd5\u9023\u63a5\u5230\u6307\u5b9a\u7684 Ollama \u4f3a\u670d\u5668\u3002",
+      "no_features_selected": "\u8acb\u81f3\u5c11\u555f\u7528\u4e00\u500b\u529f\u80fd\uff08MCP \u4f3a\u670d\u5668\u6216\u5c0d\u8a71\u6a5f\u5668\u4eba\uff09\u3002"
+    },
+    "abort": {
+      "already_configured": "HA MCP Client \u5df2\u7d93\u8a2d\u5b9a\u904e\u4e86\u3002"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA MCP Client 設定",
+        "description": "目前設定：\n- **AI 提供者**：{current_ai}\n- **模型**：{current_model}\n\n請選擇要修改的設定類別：",
+        "data": {
+          "menu_option": "設定類別"
+        }
+      },
+      "ai_service": {
+        "title": "AI 服務設定",
+        "description": "設定 AI 服務提供者和模型",
+        "data": {
+          "ai_service": "AI 服務提供者",
+          "api_key": "API 金鑰",
+          "model": "模型",
+          "base_url": "Base URL（用於 OpenAI 相容服務）",
+          "ollama_host": "Ollama 主機 URL"
+        }
+      },
+      "conversation_settings": {
+        "title": "對話設定",
+        "description": "設定對話紀錄和保留期限",
+        "data": {
+          "enable_conversation_history": "啟用對話紀錄",
+          "history_retention_days": "紀錄保留天數"
+        }
+      },
+      "advanced": {
+        "title": "進階設定",
+        "description": "設定進階選項",
+        "data": {
+          "system_prompt": "系統提示詞（自訂 AI 行為）",
+          "max_tool_calls": "每則訊息最大工具呼叫次數"
+        }
+      }
+    }
+  },
+  "services": {
+    "clear_conversation_history": {
+      "name": "\u6e05\u9664\u5c0d\u8a71\u7d00\u9304",
+      "description": "\u6e05\u9664\u7528\u6236\u7684\u5c0d\u8a71\u7d00\u9304",
+      "fields": {
+        "user_id": {
+          "name": "\u7528\u6236 ID",
+          "description": "Home Assistant \u7528\u6236 ID\uff08\u7559\u7a7a\u8868\u793a\u7576\u524d\u7528\u6236\uff09"
+        }
+      }
+    },
+    "export_conversation_history": {
+      "name": "\u532f\u51fa\u5c0d\u8a71\u7d00\u9304",
+      "description": "\u532f\u51fa\u5c0d\u8a71\u7d00\u9304\u5230\u6a94\u6848",
+      "fields": {
+        "user_id": {
+          "name": "\u7528\u6236 ID",
+          "description": "Home Assistant \u7528\u6236 ID\uff08\u7559\u7a7a\u8868\u793a\u7576\u524d\u7528\u6236\uff09"
+        },
+        "format": {
+          "name": "\u683c\u5f0f",
+          "description": "\u532f\u51fa\u683c\u5f0f\uff08json \u6216 markdown\uff09"
+        }
+      }
+    }
+  },
+  "entity": {
+    "conversation": {
+      "ha_mcp_client": {
+        "name": "HA MCP \u52a9\u7406"
+      }
+    }
+  }
+}
