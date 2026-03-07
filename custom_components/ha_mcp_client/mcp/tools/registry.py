@@ -30,6 +30,18 @@ from .helpers import (
     delete_label,
     assign_entity_to_area,
     assign_entity_to_labels,
+    list_todo_items,
+    add_todo_item,
+    update_todo_item,
+    remove_todo_item,
+    remove_completed_todo_items,
+    list_calendar_events,
+    update_calendar_event,
+    delete_calendar_event,
+    update_scene,
+    delete_scene,
+    list_blueprints,
+    import_blueprint,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -885,6 +897,345 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # Calendar List/Update/Delete
+        self.register(
+            ToolDefinition(
+                name="list_calendar_events",
+                description="List calendar events in a time range. Defaults to the next 7 days if no range specified.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "calendar_entity_id": {
+                            "type": "string",
+                            "description": "Calendar entity ID (e.g., 'calendar.home' or 'calendar.family')",
+                        },
+                        "start": {
+                            "type": "string",
+                            "description": "Start time (ISO 8601 format), defaults to today 00:00",
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "End time (ISO 8601 format), defaults to 7 days from start",
+                        },
+                    },
+                    "required": ["calendar_entity_id"],
+                },
+                handler=self._handle_list_calendar_events,
+                category="calendar",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="update_calendar_event",
+                description="Update a calendar event's summary, time, description, or location. Use list_calendar_events first to get the event UID.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "calendar_entity_id": {
+                            "type": "string",
+                            "description": "Calendar entity ID",
+                        },
+                        "uid": {
+                            "type": "string",
+                            "description": "Event UID (from list_calendar_events)",
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "New event title",
+                        },
+                        "start": {
+                            "type": "string",
+                            "description": "New start time (ISO 8601)",
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "New end time (ISO 8601)",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New event description",
+                        },
+                        "location": {
+                            "type": "string",
+                            "description": "New event location",
+                        },
+                        "recurrence_id": {
+                            "type": "string",
+                            "description": "Recurrence instance ID for recurring events",
+                        },
+                    },
+                    "required": ["calendar_entity_id", "uid"],
+                },
+                handler=self._handle_update_calendar_event,
+                category="calendar",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="delete_calendar_event",
+                description="Delete a calendar event. Use list_calendar_events first to get the event UID.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "calendar_entity_id": {
+                            "type": "string",
+                            "description": "Calendar entity ID",
+                        },
+                        "uid": {
+                            "type": "string",
+                            "description": "Event UID (from list_calendar_events)",
+                        },
+                        "recurrence_id": {
+                            "type": "string",
+                            "description": "Recurrence instance ID (to delete a single instance of recurring event)",
+                        },
+                    },
+                    "required": ["calendar_entity_id", "uid"],
+                },
+                handler=self._handle_delete_calendar_event,
+                category="calendar",
+            )
+        )
+
+        # Todo CRUD Tools
+        self.register(
+            ToolDefinition(
+                name="list_todo_items",
+                description="List items in a todo list. Use search_entities(domain='todo') first to find available todo lists.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Todo entity ID (e.g., 'todo.shopping_list')",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["needs_action", "completed"],
+                            "description": "Filter by status: needs_action=pending, completed=done",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_list_todo_items,
+                category="todo",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="add_todo_item",
+                description="Add an item to a todo list",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Todo entity ID (e.g., 'todo.shopping_list')",
+                        },
+                        "item": {
+                            "type": "string",
+                            "description": "Item name/summary",
+                        },
+                        "due_date": {
+                            "type": "string",
+                            "description": "Optional due date (YYYY-MM-DD)",
+                        },
+                        "due_datetime": {
+                            "type": "string",
+                            "description": "Optional due datetime (ISO 8601)",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional item description",
+                        },
+                    },
+                    "required": ["entity_id", "item"],
+                },
+                handler=self._handle_add_todo_item,
+                category="todo",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="update_todo_item",
+                description="Update a todo item (rename, mark complete/incomplete, change due date). Use list_todo_items first to see current items.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Todo entity ID",
+                        },
+                        "item": {
+                            "type": "string",
+                            "description": "Current item name to update",
+                        },
+                        "rename": {
+                            "type": "string",
+                            "description": "New name for the item",
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["needs_action", "completed"],
+                            "description": "New status",
+                        },
+                        "due_date": {
+                            "type": "string",
+                            "description": "New due date (YYYY-MM-DD)",
+                        },
+                        "due_datetime": {
+                            "type": "string",
+                            "description": "New due datetime (ISO 8601)",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description",
+                        },
+                    },
+                    "required": ["entity_id", "item"],
+                },
+                handler=self._handle_update_todo_item,
+                category="todo",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="remove_todo_item",
+                description="Remove an item from a todo list. Use list_todo_items first to see current items.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Todo entity ID",
+                        },
+                        "item": {
+                            "type": "string",
+                            "description": "Item name to remove",
+                        },
+                    },
+                    "required": ["entity_id", "item"],
+                },
+                handler=self._handle_remove_todo_item,
+                category="todo",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="remove_completed_todo_items",
+                description="Remove all completed items from a todo list",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Todo entity ID",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_remove_completed_todo_items,
+                category="todo",
+            )
+        )
+
+        # Scene Update/Delete
+        self.register(
+            ToolDefinition(
+                name="update_scene",
+                description="Update a scene's name, icon, or entity states. Use list_scenes first to find the entity_id.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Scene entity ID (e.g., 'scene.movie_night')",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "New scene name",
+                        },
+                        "icon": {
+                            "type": "string",
+                            "description": "New MDI icon (e.g., 'mdi:movie')",
+                        },
+                        "entities": {
+                            "type": "object",
+                            "description": "Updated entity states dict (e.g., {'light.living_room': {'state': 'on', 'brightness': 128}})",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_scene,
+                category="scene",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="delete_scene",
+                description="Delete a scene. Use list_scenes first to find the entity_id.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Scene entity ID (e.g., 'scene.movie_night')",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_delete_scene,
+                category="scene",
+            )
+        )
+
+        # Blueprint Tools
+        self.register(
+            ToolDefinition(
+                name="list_blueprints",
+                description="List installed automation or script blueprints",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "enum": ["automation", "script"],
+                            "description": "Blueprint domain: 'automation' or 'script'",
+                        },
+                    },
+                    "required": ["domain"],
+                },
+                handler=self._handle_list_blueprints,
+                category="blueprint",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="import_blueprint",
+                description="Import a blueprint from a URL (GitHub, Home Assistant Community, etc.)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Blueprint source URL (GitHub raw URL or HA Community forum link)",
+                        },
+                    },
+                    "required": ["url"],
+                },
+                handler=self._handle_import_blueprint,
+                category="blueprint",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
@@ -1443,4 +1794,176 @@ NEVER call create_scene without the 'entities' parameter!""",
             description=description,
             location=location,
             all_day=all_day,
+        )
+
+    async def _handle_list_calendar_events(
+        self,
+        calendar_entity_id: str,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle list_calendar_events tool."""
+        return await list_calendar_events(
+            self.hass,
+            calendar_entity_id=calendar_entity_id,
+            start=start,
+            end=end,
+        )
+
+    async def _handle_update_calendar_event(
+        self,
+        calendar_entity_id: str,
+        uid: str,
+        summary: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        description: str | None = None,
+        location: str | None = None,
+        recurrence_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_calendar_event tool."""
+        return await update_calendar_event(
+            self.hass,
+            calendar_entity_id=calendar_entity_id,
+            uid=uid,
+            summary=summary,
+            start=start,
+            end=end,
+            description=description,
+            location=location,
+            recurrence_id=recurrence_id,
+        )
+
+    async def _handle_delete_calendar_event(
+        self,
+        calendar_entity_id: str,
+        uid: str,
+        recurrence_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle delete_calendar_event tool."""
+        return await delete_calendar_event(
+            self.hass,
+            calendar_entity_id=calendar_entity_id,
+            uid=uid,
+            recurrence_id=recurrence_id,
+        )
+
+    async def _handle_list_todo_items(
+        self,
+        entity_id: str,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle list_todo_items tool."""
+        return await list_todo_items(
+            self.hass,
+            entity_id=entity_id,
+            status=status,
+        )
+
+    async def _handle_add_todo_item(
+        self,
+        entity_id: str,
+        item: str,
+        due_date: str | None = None,
+        due_datetime: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle add_todo_item tool."""
+        return await add_todo_item(
+            self.hass,
+            entity_id=entity_id,
+            item=item,
+            due_date=due_date,
+            due_datetime=due_datetime,
+            description=description,
+        )
+
+    async def _handle_update_todo_item(
+        self,
+        entity_id: str,
+        item: str,
+        rename: str | None = None,
+        status: str | None = None,
+        due_date: str | None = None,
+        due_datetime: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_todo_item tool."""
+        return await update_todo_item(
+            self.hass,
+            entity_id=entity_id,
+            item=item,
+            rename=rename,
+            status=status,
+            due_date=due_date,
+            due_datetime=due_datetime,
+            description=description,
+        )
+
+    async def _handle_remove_todo_item(
+        self,
+        entity_id: str,
+        item: str,
+    ) -> dict[str, Any]:
+        """Handle remove_todo_item tool."""
+        return await remove_todo_item(
+            self.hass,
+            entity_id=entity_id,
+            item=item,
+        )
+
+    async def _handle_remove_completed_todo_items(
+        self,
+        entity_id: str,
+    ) -> dict[str, Any]:
+        """Handle remove_completed_todo_items tool."""
+        return await remove_completed_todo_items(
+            self.hass,
+            entity_id=entity_id,
+        )
+
+    async def _handle_update_scene(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        icon: str | None = None,
+        entities: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_scene tool."""
+        return await update_scene(
+            self.hass,
+            entity_id=entity_id,
+            name=name,
+            icon=icon,
+            entities=entities,
+        )
+
+    async def _handle_delete_scene(
+        self,
+        entity_id: str,
+    ) -> dict[str, Any]:
+        """Handle delete_scene tool."""
+        return await delete_scene(
+            self.hass,
+            entity_id=entity_id,
+        )
+
+    async def _handle_list_blueprints(
+        self,
+        domain: str,
+    ) -> dict[str, Any]:
+        """Handle list_blueprints tool."""
+        return await list_blueprints(
+            self.hass,
+            domain=domain,
+        )
+
+    async def _handle_import_blueprint(
+        self,
+        url: str,
+    ) -> dict[str, Any]:
+        """Handle import_blueprint tool."""
+        return await import_blueprint(
+            self.hass,
+            url=url,
         )

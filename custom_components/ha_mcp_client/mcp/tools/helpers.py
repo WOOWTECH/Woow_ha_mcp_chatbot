@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
@@ -525,7 +525,9 @@ async def create_scene(
     entities: dict[str, Any],
     icon: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new scene in Home Assistant.
+    """Create a new persistent scene in Home Assistant.
+
+    Writes to scenes.yaml and reloads, so the scene persists across restarts.
 
     Args:
         hass: Home Assistant instance
@@ -533,34 +535,41 @@ async def create_scene(
         entities: Dict of entity_id to state. Example: {"light.living_room": {"state": "on", "brightness": 255}}
         icon: Optional MDI icon
     """
-    try:
-        import re
+    import re
+    import yaml
 
+    try:
         # Generate scene_id - must be valid slug (ASCII only)
         scene_id = name.lower().replace(" ", "_").replace("-", "_")
-        # Keep only ASCII letters, numbers, and underscores
         scene_id = re.sub(r'[^a-z0-9_]', '', scene_id)
-        # If empty after removing non-ASCII, generate a unique ID
         if not scene_id:
             import uuid
             scene_id = f"scene_{str(uuid.uuid4()).replace('-', '')[:8]}"
 
-        # Use HA's scene.create service to create a dynamic scene
-        # This creates a scene that shows up in the UI immediately
-        service_data = {
-            "scene_id": scene_id,
+        config: dict[str, Any] = {
+            "id": scene_id,
+            "name": name,
             "entities": entities,
         }
+        if icon:
+            config["icon"] = icon
 
-        # If we have snapshot entities, add them
-        # For now, we use the entities dict directly
+        config_path = hass.config.path("scenes.yaml")
 
-        await hass.services.async_call(
-            "scene",
-            "create",
-            service_data,
-            blocking=True,
-        )
+        def _write_scene():
+            try:
+                with open(config_path, "r") as f:
+                    existing = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                existing = []
+            if not isinstance(existing, list):
+                existing = []
+            existing.append(config)
+            with open(config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+
+        await hass.async_add_executor_job(_write_scene)
+        await hass.services.async_call("scene", "reload", blocking=True)
 
         entity_id = f"scene.{scene_id}"
 
@@ -568,7 +577,7 @@ async def create_scene(
             "success": True,
             "scene_id": scene_id,
             "entity_id": entity_id,
-            "message": f"情境「{name}」已建立，entity_id: {entity_id}",
+            "message": f"情境「{name}」已建立（持久化），entity_id: {entity_id}",
         }
 
     except Exception as e:
@@ -1064,6 +1073,854 @@ async def assign_entity_to_area(
             "success": False,
             "error": "assign_failed",
             "message": f"分配實體到分區失敗：{str(e)}",
+        }
+
+
+async def list_todo_items(
+    hass: HomeAssistant,
+    entity_id: str,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """List items in a todo list.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Todo entity ID (e.g., 'todo.shopping_list')
+        status: Filter by status: 'needs_action' or 'completed'
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            available = [s.entity_id for s in hass.states.async_all("todo")]
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到待辦清單: {entity_id}",
+                "available": available,
+            }
+
+        service_data: dict[str, Any] = {}
+        if status:
+            service_data["status"] = [status]
+
+        result = await hass.services.async_call(
+            "todo",
+            "get_items",
+            service_data=service_data,
+            target={"entity_id": entity_id},
+            blocking=True,
+            return_response=True,
+        )
+
+        return {"success": True, "entity_id": entity_id, "items": result}
+
+    except Exception as e:
+        _LOGGER.error("Error listing todo items for %s: %s", entity_id, e)
+        return {
+            "success": False,
+            "error": "list_failed",
+            "message": f"列出待辦事項失敗：{str(e)}",
+        }
+
+
+async def add_todo_item(
+    hass: HomeAssistant,
+    entity_id: str,
+    item: str,
+    due_date: str | None = None,
+    due_datetime: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Add an item to a todo list.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Todo entity ID
+        item: Item name/summary
+        due_date: Optional due date (YYYY-MM-DD)
+        due_datetime: Optional due datetime (ISO 8601)
+        description: Optional description
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到待辦清單: {entity_id}",
+            }
+
+        service_data: dict[str, Any] = {"item": item}
+        if due_date:
+            service_data["due_date"] = due_date
+        if due_datetime:
+            service_data["due_datetime"] = due_datetime
+        if description:
+            service_data["description"] = description
+
+        await hass.services.async_call(
+            "todo",
+            "add_item",
+            service_data=service_data,
+            target={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "item": item,
+            "message": f"已新增待辦事項「{item}」",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error adding todo item: %s", e)
+        return {
+            "success": False,
+            "error": "add_failed",
+            "message": f"新增待辦事項失敗：{str(e)}",
+        }
+
+
+async def update_todo_item(
+    hass: HomeAssistant,
+    entity_id: str,
+    item: str,
+    rename: str | None = None,
+    status: str | None = None,
+    due_date: str | None = None,
+    due_datetime: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Update a todo item.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Todo entity ID
+        item: Current item name to update
+        rename: New name for the item
+        status: New status ('needs_action' or 'completed')
+        due_date: New due date (YYYY-MM-DD)
+        due_datetime: New due datetime (ISO 8601)
+        description: New description
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到待辦清單: {entity_id}",
+            }
+
+        service_data: dict[str, Any] = {"item": item}
+        if rename:
+            service_data["rename"] = rename
+        if status:
+            service_data["status"] = status
+        if due_date:
+            service_data["due_date"] = due_date
+        if due_datetime:
+            service_data["due_datetime"] = due_datetime
+        if description:
+            service_data["description"] = description
+
+        await hass.services.async_call(
+            "todo",
+            "update_item",
+            service_data=service_data,
+            target={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        changes = []
+        if rename:
+            changes.append(f"重命名為「{rename}」")
+        if status:
+            changes.append(f"狀態改為 {status}")
+        if due_date or due_datetime:
+            changes.append("截止日期已更新")
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "item": item,
+            "message": f"已更新待辦事項「{item}」：{', '.join(changes) if changes else '已更新'}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating todo item: %s", e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新待辦事項失敗：{str(e)}",
+        }
+
+
+async def remove_todo_item(
+    hass: HomeAssistant,
+    entity_id: str,
+    item: str,
+) -> dict[str, Any]:
+    """Remove an item from a todo list.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Todo entity ID
+        item: Item name to remove
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到待辦清單: {entity_id}",
+            }
+
+        await hass.services.async_call(
+            "todo",
+            "remove_item",
+            service_data={"item": item},
+            target={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "item": item,
+            "message": f"已移除待辦事項「{item}」",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error removing todo item: %s", e)
+        return {
+            "success": False,
+            "error": "remove_failed",
+            "message": f"移除待辦事項失敗：{str(e)}",
+        }
+
+
+async def remove_completed_todo_items(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Remove all completed items from a todo list.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Todo entity ID
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到待辦清單: {entity_id}",
+            }
+
+        await hass.services.async_call(
+            "todo",
+            "remove_completed_items",
+            target={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "message": "已清除所有已完成的待辦事項",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error removing completed todo items: %s", e)
+        return {
+            "success": False,
+            "error": "remove_failed",
+            "message": f"清除已完成待辦事項失敗：{str(e)}",
+        }
+
+
+async def list_calendar_events(
+    hass: HomeAssistant,
+    calendar_entity_id: str,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict[str, Any]:
+    """List calendar events in a time range.
+
+    Args:
+        hass: Home Assistant instance
+        calendar_entity_id: Calendar entity ID (e.g., 'calendar.home')
+        start: Start time (ISO 8601), defaults to today 00:00
+        end: End time (ISO 8601), defaults to 7 days from start
+    """
+    try:
+        state = hass.states.get(calendar_entity_id)
+        if state is None:
+            available = [s.entity_id for s in hass.states.async_all("calendar")]
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到日曆: {calendar_entity_id}",
+                "available": available,
+            }
+
+        now = datetime.now(timezone.utc)
+        if start:
+            start_dt = datetime.fromisoformat(start)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+        else:
+            start_dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        if end:
+            end_dt = datetime.fromisoformat(end)
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        else:
+            end_dt = start_dt + timedelta(days=7)
+
+        # Use HA's calendar platform to get events
+        entity_component = hass.data.get("entity_components", {}).get("calendar")
+        if entity_component is None:
+            # Fallback: try hass.data["calendar"]
+            entity_component = hass.data.get("calendar")
+
+        if entity_component is None:
+            return {
+                "success": False,
+                "error": "calendar_not_loaded",
+                "message": "日曆元件未載入",
+            }
+
+        # Get the calendar entity
+        if hasattr(entity_component, "get_entity"):
+            entity = entity_component.get_entity(calendar_entity_id)
+        else:
+            entity = None
+
+        if entity is None:
+            # Try alternative approach via entity platform
+            for platform_entity in entity_component.entities:
+                if platform_entity.entity_id == calendar_entity_id:
+                    entity = platform_entity
+                    break
+
+        if entity is None:
+            return {
+                "success": False,
+                "error": "entity_not_accessible",
+                "message": f"無法存取日曆實體: {calendar_entity_id}",
+            }
+
+        events = await entity.async_get_events(hass, start_dt, end_dt)
+
+        result = []
+        for event in events:
+            event_dict: dict[str, Any] = {
+                "summary": event.summary,
+                "start": str(event.start),
+                "end": str(event.end),
+            }
+            if hasattr(event, "uid") and event.uid:
+                event_dict["uid"] = event.uid
+            if hasattr(event, "description") and event.description:
+                event_dict["description"] = event.description
+            if hasattr(event, "location") and event.location:
+                event_dict["location"] = event.location
+            if hasattr(event, "recurrence_id") and event.recurrence_id:
+                event_dict["recurrence_id"] = event.recurrence_id
+            result.append(event_dict)
+
+        return {
+            "success": True,
+            "calendar": calendar_entity_id,
+            "start": str(start_dt),
+            "end": str(end_dt),
+            "count": len(result),
+            "events": result,
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error listing calendar events: %s", e)
+        return {
+            "success": False,
+            "error": "list_failed",
+            "message": f"列出日曆事件失敗：{str(e)}",
+        }
+
+
+async def update_calendar_event(
+    hass: HomeAssistant,
+    calendar_entity_id: str,
+    uid: str,
+    summary: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    description: str | None = None,
+    location: str | None = None,
+    recurrence_id: str | None = None,
+) -> dict[str, Any]:
+    """Update a calendar event.
+
+    Args:
+        hass: Home Assistant instance
+        calendar_entity_id: Calendar entity ID
+        uid: Event UID (from list_calendar_events)
+        summary: New event title
+        start: New start time (ISO 8601)
+        end: New end time (ISO 8601)
+        description: New description
+        location: New location
+        recurrence_id: Recurrence instance ID for recurring events
+    """
+    try:
+        state = hass.states.get(calendar_entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到日曆: {calendar_entity_id}",
+            }
+
+        # Build event update object
+        event: dict[str, Any] = {}
+        if summary is not None:
+            event["summary"] = summary
+        if description is not None:
+            event["description"] = description
+        if location is not None:
+            event["location"] = location
+        if start is not None:
+            # HA _parse_event expects "dtstart"/"dtend" keys with date/datetime objects
+            if "T" not in start:
+                event["dtstart"] = date.fromisoformat(start)
+            else:
+                event["dtstart"] = datetime.fromisoformat(start)
+        if end is not None:
+            if "T" not in end:
+                event["dtend"] = date.fromisoformat(end)
+            else:
+                event["dtend"] = datetime.fromisoformat(end)
+
+        if not event:
+            return {
+                "success": False,
+                "error": "no_changes",
+                "message": "沒有指定要更新的內容",
+            }
+
+        # Get the calendar entity
+        entity_component = hass.data.get("entity_components", {}).get("calendar")
+        if entity_component is None:
+            entity_component = hass.data.get("calendar")
+
+        entity = None
+        if entity_component:
+            if hasattr(entity_component, "get_entity"):
+                entity = entity_component.get_entity(calendar_entity_id)
+            if entity is None:
+                for platform_entity in entity_component.entities:
+                    if platform_entity.entity_id == calendar_entity_id:
+                        entity = platform_entity
+                        break
+
+        if entity is None:
+            return {
+                "success": False,
+                "error": "entity_not_accessible",
+                "message": f"無法存取日曆實體: {calendar_entity_id}",
+            }
+
+        await entity.async_update_event(
+            uid,
+            event,
+            recurrence_id=recurrence_id,
+        )
+
+        return {
+            "success": True,
+            "calendar": calendar_entity_id,
+            "uid": uid,
+            "message": f"日曆事件已更新",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating calendar event: %s", e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新日曆事件失敗：{str(e)}",
+        }
+
+
+async def delete_calendar_event(
+    hass: HomeAssistant,
+    calendar_entity_id: str,
+    uid: str,
+    recurrence_id: str | None = None,
+) -> dict[str, Any]:
+    """Delete a calendar event.
+
+    Args:
+        hass: Home Assistant instance
+        calendar_entity_id: Calendar entity ID
+        uid: Event UID (from list_calendar_events)
+        recurrence_id: Recurrence instance ID for recurring events
+    """
+    try:
+        state = hass.states.get(calendar_entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到日曆: {calendar_entity_id}",
+            }
+
+        # Get the calendar entity
+        entity_component = hass.data.get("entity_components", {}).get("calendar")
+        if entity_component is None:
+            entity_component = hass.data.get("calendar")
+
+        entity = None
+        if entity_component:
+            if hasattr(entity_component, "get_entity"):
+                entity = entity_component.get_entity(calendar_entity_id)
+            if entity is None:
+                for platform_entity in entity_component.entities:
+                    if platform_entity.entity_id == calendar_entity_id:
+                        entity = platform_entity
+                        break
+
+        if entity is None:
+            return {
+                "success": False,
+                "error": "entity_not_accessible",
+                "message": f"無法存取日曆實體: {calendar_entity_id}",
+            }
+
+        await entity.async_delete_event(
+            uid,
+            recurrence_id=recurrence_id,
+        )
+
+        return {
+            "success": True,
+            "calendar": calendar_entity_id,
+            "uid": uid,
+            "message": "日曆事件已刪除",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error deleting calendar event: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "message": f"刪除日曆事件失敗：{str(e)}",
+        }
+
+
+async def update_scene(
+    hass: HomeAssistant,
+    entity_id: str,
+    name: str | None = None,
+    icon: str | None = None,
+    entities: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Update a scene in Home Assistant.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Scene entity ID (e.g., 'scene.movie_night')
+        name: New name for the scene
+        icon: New MDI icon
+        entities: Updated entity states dict
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到情境: {entity_id}",
+            }
+
+        # Extract scene_id from entity_id
+        scene_id = entity_id.replace("scene.", "", 1)
+
+        config_path = hass.config.path("scenes.yaml")
+
+        def _update_scene():
+            try:
+                with open(config_path, "r") as f:
+                    scenes = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return None
+
+            if not isinstance(scenes, list):
+                return None
+
+            # Find the scene by id or name
+            found_idx = None
+            for idx, scene in enumerate(scenes):
+                sid = scene.get("id", "")
+                if sid == scene_id:
+                    found_idx = idx
+                    break
+
+            if found_idx is None:
+                # Try matching by entity_id pattern
+                for idx, scene in enumerate(scenes):
+                    scene_name = scene.get("name", "")
+                    import re
+                    generated_id = scene_name.lower().replace(" ", "_").replace("-", "_")
+                    generated_id = re.sub(r'[^a-z0-9_]', '', generated_id)
+                    if generated_id == scene_id:
+                        found_idx = idx
+                        break
+
+            if found_idx is None:
+                return None
+
+            # Update fields
+            if name is not None:
+                scenes[found_idx]["name"] = name
+            if icon is not None:
+                scenes[found_idx]["icon"] = icon
+            if entities is not None:
+                scenes[found_idx]["entities"] = entities
+
+            with open(config_path, "w") as f:
+                yaml.dump(scenes, f, default_flow_style=False, allow_unicode=True)
+
+            return scenes[found_idx]
+
+        updated = await hass.async_add_executor_job(_update_scene)
+
+        if updated is None:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 scenes.yaml 中找不到情境: {entity_id}",
+            }
+
+        await hass.services.async_call("scene", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "message": f"情境「{updated.get('name', scene_id)}」已更新",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating scene: %s", e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新情境失敗：{str(e)}",
+        }
+
+
+async def delete_scene(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Delete a scene from Home Assistant.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Scene entity ID (e.g., 'scene.movie_night')
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到情境: {entity_id}",
+            }
+
+        scene_id = entity_id.replace("scene.", "", 1)
+        scene_name = state.attributes.get("friendly_name", entity_id)
+
+        config_path = hass.config.path("scenes.yaml")
+
+        def _delete_scene():
+            try:
+                with open(config_path, "r") as f:
+                    scenes = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return False
+
+            if not isinstance(scenes, list):
+                return False
+
+            original_len = len(scenes)
+
+            # Remove matching scene
+            import re
+            scenes = [
+                s for s in scenes
+                if not (
+                    s.get("id", "") == scene_id
+                    or re.sub(r'[^a-z0-9_]', '', s.get("name", "").lower().replace(" ", "_").replace("-", "_")) == scene_id
+                )
+            ]
+
+            if len(scenes) == original_len:
+                return False
+
+            with open(config_path, "w") as f:
+                yaml.dump(scenes, f, default_flow_style=False, allow_unicode=True)
+
+            return True
+
+        deleted = await hass.async_add_executor_job(_delete_scene)
+
+        if not deleted:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 scenes.yaml 中找不到情境: {entity_id}",
+            }
+
+        await hass.services.async_call("scene", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "message": f"情境「{scene_name}」已刪除",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error deleting scene: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "message": f"刪除情境失敗：{str(e)}",
+        }
+
+
+async def list_blueprints(
+    hass: HomeAssistant,
+    domain: str,
+) -> dict[str, Any]:
+    """List installed blueprints.
+
+    Args:
+        hass: Home Assistant instance
+        domain: Blueprint domain ('automation' or 'script')
+    """
+    try:
+        if domain not in ("automation", "script"):
+            return {
+                "success": False,
+                "error": "invalid_domain",
+                "message": f"無效的藍圖域: {domain}。可用的域: automation, script",
+            }
+
+        blueprint_data = hass.data.get("blueprint", {})
+        domain_blueprints = blueprint_data.get(domain)
+
+        if domain_blueprints is None:
+            return {
+                "success": True,
+                "domain": domain,
+                "count": 0,
+                "blueprints": [],
+                "message": f"沒有找到 {domain} 藍圖",
+            }
+
+        blueprints = await domain_blueprints.async_get_blueprints()
+
+        result = []
+        for path, bp in blueprints.items():
+            if bp is not None:
+                metadata = bp.metadata or {} if hasattr(bp, "metadata") else {}
+                result.append({
+                    "path": path,
+                    "name": metadata.get("name", path),
+                    "description": metadata.get("description", ""),
+                    "domain": metadata.get("domain", domain),
+                })
+
+        return {
+            "success": True,
+            "domain": domain,
+            "count": len(result),
+            "blueprints": result,
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error listing blueprints: %s", e)
+        return {
+            "success": False,
+            "error": "list_failed",
+            "message": f"列出藍圖失敗：{str(e)}",
+        }
+
+
+async def import_blueprint(
+    hass: HomeAssistant,
+    url: str,
+) -> dict[str, Any]:
+    """Import a blueprint from a URL.
+
+    Args:
+        hass: Home Assistant instance
+        url: Blueprint source URL (GitHub, HA Community, etc.)
+    """
+    try:
+        from homeassistant.components.blueprint import importer
+
+        result = await importer.fetch_blueprint_from_url(hass, url)
+
+        if result is None:
+            return {
+                "success": False,
+                "error": "import_failed",
+                "message": f"無法從 URL 匯入藍圖: {url}",
+            }
+
+        # Save the blueprint
+        blueprint = result.blueprint
+        metadata = blueprint.metadata or {}
+        domain = metadata.get("domain", "automation")
+
+        blueprint_data = hass.data.get("blueprint", {})
+        domain_blueprints = blueprint_data.get(domain)
+
+        if domain_blueprints is None:
+            return {
+                "success": False,
+                "error": "domain_not_found",
+                "message": f"藍圖域 {domain} 未載入",
+            }
+
+        # Save with suggested filename
+        suggested_filename = result.suggested_filename
+        await domain_blueprints.async_add_blueprint(blueprint, suggested_filename)
+
+        return {
+            "success": True,
+            "domain": domain,
+            "name": metadata.get("name", suggested_filename),
+            "path": suggested_filename,
+            "message": f"藍圖「{metadata.get('name', suggested_filename)}」已匯入",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error importing blueprint from %s: %s", url, e)
+        return {
+            "success": False,
+            "error": "import_failed",
+            "message": f"匯入藍圖失敗：{str(e)}",
         }
 
 
