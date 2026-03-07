@@ -1,4 +1,4 @@
-# PRD: MCP 工具完整性 — 日曆/待辦 CRUD、藍圖、服務域覆蓋
+# PRD: MCP 工具完整性 — 日曆/待辦/情境 CRUD、藍圖、服務域覆蓋
 
 **日期**: 2026-03-07
 **狀態**: 設計中
@@ -12,10 +12,11 @@
 
 1. **日曆 (Calendar)**: 僅有 `create_calendar_event`，缺少列表/讀取/更新/刪除功能
 2. **待辦事項 (Todo)**: 完全沒有 MCP 工具，儘管 HA 提供 5 個 todo 服務
-3. **藍圖 (Blueprints)**: 完全沒有 MCP 工具，使用者詢問藍圖時 AI 無法操作
-4. **通知 (Notifications)**: 無法透過 AI 發送通知
-5. **輸入輔助 (Input Helpers)**: `input_boolean`, `input_number`, `input_select` 等無專屬工具
-6. **其他域覆蓋**: 28 個服務域目前未被 MCP 工具覆蓋
+3. **情境 (Scenes)**: 僅有 `create_scene`（暫時性）、`list_scenes`、`activate_scene`，缺少持久化建立、更新、刪除功能
+4. **藍圖 (Blueprints)**: 完全沒有 MCP 工具，使用者詢問藍圖時 AI 無法操作
+5. **通知 (Notifications)**: 無法透過 AI 發送通知
+6. **輸入輔助 (Input Helpers)**: `input_boolean`, `input_number`, `input_select` 等無專屬工具
+7. **其他域覆蓋**: 28 個服務域目前未被 MCP 工具覆蓋
 
 **使用者期望**: 所有在 HA 前端可以操作的功能，都應該能透過 MCP/AI 使用。
 
@@ -26,6 +27,7 @@
 ### 2.1 必須達成 (P0)
 - 日曆事件完整 CRUD（列表、更新、刪除）
 - 待辦事項完整 CRUD（新增、列表、更新、刪除、清除已完成）
+- 情境完整 CRUD（持久化建立、更新、刪除）— 現有 `create_scene` 用 `scene.create` 建立暫時性場景，重啟後消失
 - 藍圖操作（列表、從藍圖建立自動化/腳本）
 
 ### 2.2 應該達成 (P1)
@@ -57,7 +59,7 @@
 | Light | `control_light` | 控制 |
 | Climate | `control_climate` | 控制 |
 | Cover | `control_cover` | 控制 |
-| Scene | `list_scenes`, `activate_scene`, `create_scene` | CRA |
+| Scene | `list_scenes`, `activate_scene`, `create_scene` | CRA（create 為暫時性，缺 Update/Delete） |
 | Automation | `list_automations`, `create_automation` | CR |
 | Script | `list_scripts`, `run_script`, `create_script` | CRX |
 | Calendar | `create_calendar_event` | C 僅建立 |
@@ -71,7 +73,7 @@
 | `todo` | 無 | `add_item`, `get_items`, `update_item`, `remove_item`, `remove_completed_items` |
 | `automation` | 部分 | `toggle`, `trigger` (handler 存在但未註冊), `delete` |
 | `script` | 部分 | `delete` |
-| `scene` | 部分 | `delete` |
+| `scene` | 部分 | `update`（修改實體組合）, `delete`, `create` 改為持久化 |
 | `notify` | 無 | `notify` (多種通知服務) |
 | `input_boolean` | 無 | `turn_on`, `turn_off`, `toggle` |
 | `input_number` | 無 | `set_value`, `increment`, `decrement` |
@@ -279,9 +281,95 @@ ToolDefinition(
 )
 ```
 
+#### Phase 1: P0 — 情境 CRUD（2 個新工具 + 改寫 1 個）
+
+> **現狀問題**: 現有 `create_scene` 使用 `scene.create` 服務建立暫時性場景，HA 重啟後消失。
+> 需改為寫入 `scenes.yaml` + `scene.reload` 實現持久化，與 `create_automation` 修復方式一致。
+
+**4.1.9a `update_scene`**（新增）
+```python
+ToolDefinition(
+    name="update_scene",
+    description="更新情境的名稱、圖標或包含的實體狀態",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {"type": "string", "description": "情境實體 ID，如 scene.movie_night"},
+            "name": {"type": "string", "description": "新的情境名稱"},
+            "icon": {"type": "string", "description": "新的 MDI 圖標"},
+            "entities": {
+                "type": "object",
+                "description": "更新的實體狀態字典，如 {\"light.living_room\": {\"state\": \"on\", \"brightness\": 128}}"
+            }
+        },
+        "required": ["entity_id"]
+    },
+    category="scene"
+)
+```
+**實作方式**: 讀取 `scenes.yaml`，找到對應場景，更新欄位，寫回後呼叫 `scene.reload`。
+
+**4.1.9b `delete_scene`**（新增）
+```python
+ToolDefinition(
+    name="delete_scene",
+    description="刪除情境",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "entity_id": {"type": "string", "description": "情境實體 ID"}
+        },
+        "required": ["entity_id"]
+    },
+    category="scene"
+)
+```
+**實作方式**: 從 `scenes.yaml` 移除對應項目後呼叫 `scene.reload`。
+
+**4.1.9c 改寫 `create_scene`**（修改現有）
+
+將現有的 `scene.create` 服務呼叫改為寫入 `scenes.yaml` + `scene.reload`：
+```python
+async def create_scene(hass, name, entities, icon=None):
+    """建立持久化情境。寫入 scenes.yaml 並重載。"""
+    import yaml, re
+
+    scene_id = name.lower().replace(" ", "_").replace("-", "_")
+    scene_id = re.sub(r'[^a-z0-9_]', '', scene_id)
+    if not scene_id:
+        import uuid
+        scene_id = f"scene_{str(uuid.uuid4()).replace('-', '')[:8]}"
+
+    config = {
+        "id": scene_id,
+        "name": name,
+        "entities": entities,
+    }
+    if icon:
+        config["icon"] = icon
+
+    config_path = hass.config.path("scenes.yaml")
+
+    def _write_scene():
+        try:
+            with open(config_path, "r") as f:
+                existing = yaml.safe_load(f) or []
+        except FileNotFoundError:
+            existing = []
+        if not isinstance(existing, list):
+            existing = []
+        existing.append(config)
+        with open(config_path, "w") as f:
+            yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+
+    await hass.async_add_executor_job(_write_scene)
+    await hass.services.async_call("scene", "reload", blocking=True)
+    return {"success": True, "scene_id": scene_id, "entity_id": f"scene.{scene_id}"}
+```
+
 #### Phase 1: P0 — 藍圖操作（2 個新工具）
 
-**4.1.9 `list_blueprints`**
+**4.1.10 `list_blueprints`**
 ```python
 ToolDefinition(
     name="list_blueprints",
@@ -302,7 +390,7 @@ ToolDefinition(
 ```
 **實作方式**: 使用 WebSocket API `blueprint/list`，回傳藍圖列表含 `path`、`metadata`（`name`, `description`, `input`, `domain`）。
 
-**4.1.10 `import_blueprint`**
+**4.1.11 `import_blueprint`**
 ```python
 ToolDefinition(
     name="import_blueprint",
@@ -324,7 +412,7 @@ ToolDefinition(
 
 #### Phase 2: P1 — 通知與輸入輔助（4 個新工具）
 
-**4.1.11 `send_notification`**
+**4.1.12 `send_notification`**
 ```python
 ToolDefinition(
     name="send_notification",
@@ -344,7 +432,7 @@ ToolDefinition(
 ```
 **實作方式**: 若未指定 `target`，使用 `notify.notify`（預設廣播）；否則呼叫指定的 notify 服務。
 
-**4.1.12 `control_input_helper`**
+**4.1.13 `control_input_helper`**
 ```python
 ToolDefinition(
     name="control_input_helper",
@@ -370,7 +458,7 @@ ToolDefinition(
 ```
 **實作方式**: 根據 `entity_id` 域前綴（`input_boolean`, `input_number` 等）自動路由到對應服務。
 
-**4.1.13 `control_timer`**
+**4.1.14 `control_timer`**
 ```python
 ToolDefinition(
     name="control_timer",
@@ -392,7 +480,7 @@ ToolDefinition(
 )
 ```
 
-**4.1.14 `control_fan`**
+**4.1.15 `control_fan`**
 ```python
 ToolDefinition(
     name="control_fan",
@@ -418,9 +506,11 @@ ToolDefinition(
 )
 ```
 
-#### Phase 2: P1 — 補齊已有類別缺口（3 個新工具）
+#### Phase 2: P1 — 補齊已有類別缺口（2 個新工具）
 
-**4.1.15 `delete_automation`**
+> 注意: `delete_scene` 已移至 Phase 1 的情境 CRUD 中。
+
+**4.1.16 `delete_automation`**
 ```python
 ToolDefinition(
     name="delete_automation",
@@ -437,7 +527,7 @@ ToolDefinition(
 ```
 **實作方式**: 從 `automations.yaml` 移除對應項目後呼叫 `automation.reload`。
 
-**4.1.16 `delete_script`**
+**4.1.17 `delete_script`**
 ```python
 ToolDefinition(
     name="delete_script",
@@ -453,22 +543,6 @@ ToolDefinition(
 )
 ```
 
-**4.1.17 `delete_scene`**
-```python
-ToolDefinition(
-    name="delete_scene",
-    description="刪除場景",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "entity_id": {"type": "string", "description": "場景實體 ID"}
-        },
-        "required": ["entity_id"]
-    },
-    category="scene"
-)
-```
-
 ---
 
 ## 5. 實作架構
@@ -477,11 +551,39 @@ ToolDefinition(
 
 | 檔案 | 修改內容 |
 |------|----------|
-| `mcp/tools/helpers.py` | 新增 13 個 helper 函數 |
-| `mcp/tools/registry.py` | 新增 17 個工具定義 + handler 方法 |
+| `mcp/tools/helpers.py` | 改寫 1 個 + 新增 15 個 helper 函數 |
+| `mcp/tools/registry.py` | 新增 19 個工具定義 + handler 方法（含改寫 create_scene） |
 | `tests/test_tools.py` | 新增對應單元測試 |
 
 ### 5.2 Helper 函數設計
+
+#### Scene helpers（改寫 1 個 + 新增 2 個函數）
+
+```python
+# 改寫現有 create_scene：從 scene.create 服務改為 scenes.yaml 持久化
+async def create_scene(
+    hass: HomeAssistant,
+    name: str,
+    entities: dict[str, Any],
+    icon: str | None = None,
+) -> dict[str, Any]:
+    """建立持久化情境。寫入 scenes.yaml 並重載。"""
+
+async def update_scene(
+    hass: HomeAssistant,
+    entity_id: str,
+    name: str | None = None,
+    icon: str | None = None,
+    entities: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """更新情境。修改 scenes.yaml 對應條目並重載。"""
+
+async def delete_scene(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """刪除情境。從 scenes.yaml 移除並重載。"""
+```
 
 #### Calendar helpers（新增 3 個函數）
 
@@ -750,7 +852,23 @@ AI: [呼叫 remove_completed_todo_items(todo.shopping_list)]
 AI: 「已清除所有已完成的項目」
 ```
 
-### 6.3 藍圖操作流程
+### 6.3 情境 CRUD 完整流程
+
+```
+使用者: 「幫我建立一個電影模式，客廳燈暗一點、電視打開」
+AI: [呼叫 create_scene(name="電影模式", entities={"light.living_room": {"state": "on", "brightness": 50}, "media_player.tv": {"state": "on"}})]
+AI: 「已建立情境『電影模式』(scene.dian_ying_mo_shi)」
+
+使用者: 「電影模式把客廳燈再暗一點，亮度改 20」
+AI: [呼叫 update_scene(entity_id="scene.dian_ying_mo_shi", entities={"light.living_room": {"state": "on", "brightness": 20}, "media_player.tv": {"state": "on"}})]
+AI: 「已更新電影模式，客廳燈亮度改為 20」
+
+使用者: 「刪掉電影模式」
+AI: [呼叫 delete_scene(entity_id="scene.dian_ying_mo_shi")]
+AI: 「已刪除情境『電影模式』」
+```
+
+### 6.4 藍圖操作流程
 
 ```
 使用者: 「有什麼可用的自動化藍圖？」
@@ -776,23 +894,24 @@ AI: 「藍圖已成功匯入」
 |------|------|-----------|
 | 1 | Todo CRUD helpers + registry 註冊 | 5 |
 | 2 | Calendar list/update/delete helpers + registry 註冊 | 3 |
-| 3 | Blueprint list/import helpers + registry 註冊 | 2 |
-| 4 | 部署測試 | — |
+| 3 | Scene CRUD（改寫 create_scene 持久化 + 新增 update/delete） | 2（+改寫1） |
+| 4 | Blueprint list/import helpers + registry 註冊 | 2 |
+| 5 | 部署測試 | — |
 
-**Phase 1 完成後**: 29 → 39 個工具
+**Phase 1 完成後**: 29 → 41 個工具（新增 10 + 改寫 1 個 create_scene）
 
 ### Phase 2（P1 — 擴展覆蓋）
 
 | 步驟 | 內容 | 新增工具數 |
 |------|------|-----------|
-| 5 | 通知工具 | 1 |
-| 6 | 輸入輔助控制工具 | 1 |
-| 7 | 計時器/計數器控制工具 | 1 |
-| 8 | 風扇控制工具 | 1 |
-| 9 | 刪除 automation/script/scene 工具 | 3 |
-| 10 | 部署測試 | — |
+| 6 | 通知工具 | 1 |
+| 7 | 輸入輔助控制工具 | 1 |
+| 8 | 計時器/計數器控制工具 | 1 |
+| 9 | 風扇控制工具 | 1 |
+| 10 | 刪除 automation/script 工具 | 2 |
+| 11 | 部署測試 | — |
 
-**Phase 2 完成後**: 39 → 46 個工具
+**Phase 2 完成後**: 41 → 47 個工具
 
 ### 關於 `call_service` 的通用性說明
 
@@ -819,6 +938,9 @@ AI: 「藍圖已成功匯入」
 | `update_todo_item` | 重新命名 / 標記完成 / 修改截止日期 |
 | `remove_todo_item` | 正常移除 / 不存在的項目 |
 | `remove_completed_todo_items` | 正常清除 / 無已完成項目 |
+| `update_scene` | 更新名稱 / 更新實體 / 不存在的場景 |
+| `delete_scene` | 正常刪除 / 不存在的場景 |
+| `create_scene`（改寫後）| 持久化建立 / 重啟後存在 |
 | `list_blueprints` | automation 域 / script 域 / 無效域 |
 | `import_blueprint` | 正常匯入 / 無效 URL |
 
@@ -842,10 +964,12 @@ AI: 「藍圖已成功匯入」
 
 ## 10. 成功指標
 
-- [ ] Phase 1: 10 個新工具全部註冊且可透過聊天面板使用
-- [ ] Phase 2: 額外 7 個新工具註冊
+- [ ] Phase 1: 12 個新/改寫工具全部註冊且可透過聊天面板使用
+- [ ] Phase 2: 額外 6 個新工具註冊
 - [ ] 日曆 CRUD 完整流程可在對話中完成
 - [ ] 待辦事項 CRUD 完整流程可在對話中完成
+- [ ] 情境 CRUD 完整流程可在對話中完成（持久化，重啟不消失）
 - [ ] 藍圖列表和匯入可透過 AI 操作
 - [ ] 所有工具通過單元測試
 - [ ] 使用者問「有什麼藍圖」時 AI 能正確回應
+- [ ] 建立的情境在 HA 重啟後仍然存在
