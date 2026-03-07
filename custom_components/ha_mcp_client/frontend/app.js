@@ -223,6 +223,10 @@
     sendBtn.disabled = true;
     messageInput.value = "";
     autoResize();
+    // Guard against IME compositionend restoring text after clear
+    requestAnimationFrame(() => {
+      if (isSending) messageInput.value = "";
+    });
 
     // Show user message immediately
     appendMessage({ role: "user", content: text, timestamp: new Date().toISOString() });
@@ -398,7 +402,7 @@
       sendBtn.disabled = !messageInput.value.trim();
     });
     messageInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendMessage();
       }
