@@ -586,6 +586,22 @@ async def create_calendar_event(
         location: Optional event location
     """
     try:
+        # Validate calendar entity exists
+        state = hass.states.get(calendar_entity_id)
+        if state is None:
+            available = [
+                s.entity_id
+                for s in hass.states.async_all("calendar")
+            ]
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": (
+                    f"Calendar entity '{calendar_entity_id}' not found. "
+                    f"Available calendars: {available}"
+                ),
+            }
+
         service_data = {
             "summary": summary,
             "start_date_time": start,
