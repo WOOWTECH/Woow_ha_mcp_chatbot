@@ -151,7 +151,7 @@ class MCPSession:
         # Allow initialize and ping without prior initialization
         if method == "initialize":
             return await self._handle_initialize(msg_id, params)
-        elif method == "initialized":
+        elif method in ("initialized", "notifications/initialized"):
             return await self._handle_initialized(msg_id)
         elif method == "ping":
             return await self._handle_ping(msg_id)
