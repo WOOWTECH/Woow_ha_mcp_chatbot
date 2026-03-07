@@ -965,9 +965,15 @@ NEVER call create_scene without the 'entities' parameter!""",
         service: str,
         entity_id: str | None = None,
         data: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Handle call_service tool."""
         service_data = data or {}
+        # Merge any extra kwargs (e.g. item, brightness) into service_data
+        # so AI models that pass service params directly still work.
+        for key, value in kwargs.items():
+            if key not in service_data:
+                service_data[key] = value
         target = None
         if entity_id:
             target = {"entity_id": entity_id}

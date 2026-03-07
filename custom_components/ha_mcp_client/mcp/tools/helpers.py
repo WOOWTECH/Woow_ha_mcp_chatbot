@@ -398,33 +398,32 @@ async def create_automation(
         if condition:
             config["condition"] = condition
 
-        # Use the config websocket API to create automation
-        from homeassistant.components.automation.config import (
-            async_validate_config_item,
-        )
+        # Write to automations.yaml and reload
+        import yaml
 
-        # Validate config first
-        try:
-            await async_validate_config_item(hass, config)
-        except Exception as e:
-            return {
-                "success": False,
-                "error": "validation_failed",
-                "message": f"設定驗證失敗：{str(e)}",
-            }
+        config_path = hass.config.path("automations.yaml")
 
-        # Create via the config websocket API
-        from homeassistant.components.automation import DOMAIN as AUTOMATION_DOMAIN
-        from homeassistant.components.config import automation as config_automation
+        def _write_automation():
+            # Read existing automations
+            try:
+                with open(config_path, "r") as f:
+                    existing = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                existing = []
+            if not isinstance(existing, list):
+                existing = []
 
-        if hasattr(config_automation, "async_create_item"):
-            await config_automation.async_create_item(hass, config)
-        else:
-            return {
-                "success": False,
-                "error": "unsupported",
-                "message": "Automation creation API not available in this HA version",
-            }
+            # Append new automation
+            existing.append(config)
+
+            # Write back
+            with open(config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+
+        await hass.async_add_executor_job(_write_automation)
+
+        # Reload automations
+        await hass.services.async_call("automation", "reload", blocking=True)
 
         # Generate entity_id
         entity_id = f"automation.{alias.lower().replace(' ', '_').replace('-', '_')}"
