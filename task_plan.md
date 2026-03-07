@@ -6,32 +6,34 @@
 ## PRD
 `docs/plans/2026-03-07-chat-panel-design.md`
 
+## Status: COMPLETED — 32/32 Tests PASS (100%)
+
 ## Phases
 
-### Phase 1: 資料庫 + API（後端）— `pending`
-- [ ] 新增 conversations 資料表（SQLAlchemy model）
-- [ ] 新增 REST API 端點（views.py）
-- [ ] 修改 conversation.py 支援對話管理
-- [ ] 自動建表遷移
+### Phase 1: 資料庫 + API（後端）— `completed`
+- [x] 新增 conversations 資料表（SQLAlchemy model）
+- [x] 新增 REST API 端點（views.py）
+- [x] 修改 conversation.py 支援對話管理
+- [x] 自動建表遷移
 
-### Phase 2: input_text 整合 — `pending`
-- [ ] 建立 input_text.mcp_user_input + mcp_ai_response
-- [ ] 對話完成後自動同步到 input_text
-- [ ] 監聽 input_text 變更觸發對話
-- [ ] 防迴圈機制
+### Phase 2: input_text 整合 — `completed`
+- [x] 建立 input_text.ha_mcp_client_user_input + ha_mcp_client_ai_response
+- [x] 對話完成後自動同步到 input_text
+- [x] 監聽 input_text 變更觸發對話
+- [x] 防迴圈機制（_syncing flag）
 
-### Phase 3: 前端面板 — `pending`
-- [ ] 建立 frontend/ 目錄（index.html, styles.css, app.js）
-- [ ] 面板註冊（iframe panel）
-- [ ] 左側對話列表 UI
-- [ ] 右側聊天視窗 UI
-- [ ] 送出/載入/捲動互動
+### Phase 3: 前端面板 — `completed`
+- [x] 建立 frontend/ 目錄（index.html, styles.css, app.js）
+- [x] 面板註冊（iframe panel, StaticPathConfig）
+- [x] 左側對話列表 UI（搜尋、排序、active 標記）
+- [x] 右側聊天視窗 UI（氣泡、tool badge、loading dots）
+- [x] 送出/載入/捲動互動（Enter 送出、Shift+Enter 換行、auto-resize）
 
-### Phase 4: 完善 + 測試 — `pending`
-- [ ] RWD 響應式（手機/平板）
-- [ ] 深色/淺色主題跟隨 HA
-- [ ] 錯誤處理 + loading 狀態
-- [ ] 整合測試
+### Phase 4: 完善 + 測試 — `completed`
+- [x] RWD 響應式（768px 斷點，sidebar overlay）
+- [x] HA theme vars 整合（深色/淺色自動跟隨）
+- [x] 錯誤處理（400/401/404/500 + toast 通知）
+- [x] 整合測試（32/32 PASS）
 
 ## Decisions
 | Decision | Rationale |
@@ -45,4 +47,5 @@
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| (none yet) | | |
+| `register_static_path` AttributeError | HA 2026.1 已移除舊 API | 改用 `async_register_static_paths` + `StaticPathConfig` |
+| `hass.components.frontend` 棄用 | 舊 API 呼叫方式 | 直接 import `async_register_built_in_panel` |

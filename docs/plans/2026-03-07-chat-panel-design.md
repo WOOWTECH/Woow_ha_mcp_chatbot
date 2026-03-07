@@ -1,8 +1,10 @@
 # PRD：HA MCP Client 聊天面板 + input_text 整合
 
 **日期**: 2026-03-07
-**狀態**: 待實作
+**狀態**: 已完成
 **版本**: 0.2.0
+**實作完成日**: 2026-03-07
+**測試結果**: 32/32 PASS (100%)
 
 ---
 
@@ -106,11 +108,12 @@
 ### 6.2 面板註冊
 
 ```python
-# __init__.py 中新增
-hass.http.register_static_path(
-    "/ha_mcp_client/panel",
-    hass.config.path("custom_components/ha_mcp_client/frontend"),
-    cache_headers=False
+# __init__.py 中新增（HA 2026.1 API）
+from homeassistant.components.frontend import async_register_built_in_panel
+from homeassistant.components.http import StaticPathConfig
+
+await hass.http.async_register_static_paths(
+    [StaticPathConfig(f"/{DOMAIN}/panel", str(frontend_dir), False)]
 )
 async_register_built_in_panel(
     hass,
@@ -267,3 +270,76 @@ custom_components/ha_mcp_client/
 | conversation entity | 保留，面板是額外的 UI |
 | config flow | 不需重新設定 |
 | 舊 conversation_id | 自動歸類為「未命名對話」 |
+
+## 11. 實作紀錄
+
+### 11.1 實際修改檔案
+
+| 檔案 | 類型 | 變更內容 |
+|------|------|----------|
+| `__init__.py` | 修改 | 新增 panel 註冊（`async_register_built_in_panel`）、靜態路徑（`StaticPathConfig`）、REST API views 註冊、input_text 狀態初始化 + state_changed 監聽器 |
+| `const.py` | 修改 | 新增 `PANEL_URL`、`PANEL_TITLE`、`PANEL_ICON`、`PANEL_FRONTEND_PATH`、`INPUT_TEXT_USER`、`INPUT_TEXT_AI` 常數 |
+| `conversation.py` | 修改 | 新增 `INPUT_TEXT_USER`/`INPUT_TEXT_AI` import、對話結束後自動同步 input_text 實體 |
+| `conversation_recorder.py` | 修改 | 新增 `Conversation` SQLAlchemy model（`ha_mcp_client_conversations` 表）、`_create_tables` 新增第二張表、新增 6 個 CRUD 方法 |
+| `manifest.json` | 修改 | `dependencies` 新增 `"frontend"` |
+| `views.py` | 新增 | 3 個 `HomeAssistantView` 類別（`ConversationsListView`、`ConversationDetailView`、`ConversationMessagesView`）共 6 個 REST 端點 |
+| `frontend/index.html` | 新增 | ChatGPT 風格主頁面、sidebar + chat area 佈局、重新命名/刪除對話框 |
+| `frontend/styles.css` | 新增 | HA theme vars 整合、RWD（768px 斷點）、氣泡/動畫/對話框/toast 樣式 |
+| `frontend/app.js` | 新增 | 完整前端邏輯：token 認證（自動從 HA iframe parent 取得）、對話 CRUD、訊息收發、搜尋、重新命名、刪除 |
+
+### 11.2 部署中修正的問題
+
+| 問題 | 原因 | 修正 |
+|------|------|------|
+| `register_static_path` AttributeError | HA 2026.1 已移除舊 API | 改用 `async_register_static_paths` + `StaticPathConfig` |
+| `hass.components.frontend` 警告 | 已棄用的呼叫方式 | 改為直接 import `async_register_built_in_panel`、`async_remove_panel` |
+| T3.1 test encoding | `requests` 預設 ISO-8859-1 | 測試中使用 `r.content.decode("utf-8")` |
+| T4.3 test race condition | 多個測試共用 input_text 狀態 | 使用獨立對話 + 唯一 message |
+
+### 11.3 測試報告
+
+**測試套件**: `test_chat_panel_v2.py` — 32 項自動化測試
+**執行時間**: 2026-03-07T19:58 UTC
+**結果**: **32/32 PASS (100%)**
+
+| 分類 | 測試項目 | 結果 |
+|------|----------|------|
+| **Phase 0: 認證** | | |
+| T0.1 | 取得 fresh access token | PASS |
+| **Phase 1: 對話 CRUD** | | |
+| T1.1 | 列出對話 (GET) | PASS |
+| T1.2 | 建立對話 (POST 201) | PASS |
+| T1.3 | 建立第二個對話 | PASS |
+| T1.4 | 列表包含新對話 | PASS |
+| T1.5 | 重新命名 (PATCH) | PASS |
+| T1.6 | 驗證重新命名結果 | PASS |
+| T1.7 | 刪除對話 (DELETE) | PASS |
+| T1.8 | 已刪除不在列表中 | PASS |
+| T1.9 | 不存在的對話 → 404 | PASS |
+| T1.10 | 無認證 → 401 | PASS |
+| **Phase 2: 訊息** | | |
+| T2.1 | 取得訊息（空） | PASS |
+| T2.2 | 發送訊息 + AI 回覆 | PASS |
+| T2.3 | 訊息持久化至 DB | PASS |
+| T2.4 | 工具呼叫查詢（溫度） | PASS |
+| T2.5 | 空訊息 → 400 | PASS |
+| T2.6 | 不存在對話的訊息 → 404 | PASS |
+| T2.7 | 第一則訊息自動命名 | PASS |
+| **Phase 3: 前端面板** | | |
+| T3.1 | index.html 正確提供 (UTF-8) | PASS |
+| T3.2 | styles.css 含 RWD | PASS |
+| T3.3 | app.js 含所有功能 | PASS |
+| T3.4 | 面板已在側邊欄註冊 | PASS |
+| **Phase 4: input_text** | | |
+| T4.1 | 使用者輸入實體存在 | PASS |
+| T4.2 | AI 回覆實體存在 | PASS |
+| T4.3 | input_text 同步正常 | PASS |
+| **Phase 5: 資料庫** | | |
+| T5.1 | conversations 表結構正確 | PASS |
+| T5.2 | messages 表結構正確 | PASS |
+| T5.3 | 訊息按時間排序 | PASS |
+| T5.4 | 分頁功能 (limit/offset) | PASS |
+| **Phase 6: 錯誤處理** | | |
+| T6.1 | 無效 JSON → 400 | PASS |
+| T6.2 | 缺少 message 欄位 → 400 | PASS |
+| T6.3 | 刪除不存在對話 → 404 | PASS |
