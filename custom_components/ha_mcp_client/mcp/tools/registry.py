@@ -1256,6 +1256,15 @@ NEVER call create_scene without the 'entities' parameter!""",
         rgb_color: list[int] | None = None,
     ) -> dict[str, Any]:
         """Handle control_light tool."""
+        service_map = {
+            "on": "turn_on",
+            "off": "turn_off",
+            "toggle": "toggle",
+        }
+        service = service_map.get(action)
+        if service is None:
+            return {"error": f"Unknown action: {action}"}
+
         service_data: dict[str, Any] = {}
 
         if brightness is not None:
@@ -1268,7 +1277,7 @@ NEVER call create_scene without the 'entities' parameter!""",
         return await call_ha_service(
             self.hass,
             "light",
-            action,
+            service,
             service_data=service_data if service_data else None,
             target={"entity_id": entity_id},
         )
