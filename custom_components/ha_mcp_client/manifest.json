@@ -3,7 +3,7 @@
   "name": "HA MCP Client",
   "codeowners": ["@your-username"],
   "config_flow": true,
-  "dependencies": ["conversation", "recorder", "http"],
+  "dependencies": ["conversation", "recorder", "http", "frontend"],
   "documentation": "https://github.com/your-username/ha-mcp-client",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/your-username/ha-mcp-client/issues",

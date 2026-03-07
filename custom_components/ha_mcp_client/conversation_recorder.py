@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.components.recorder import get_instance
 from homeassistant.helpers.event import async_track_time_interval
 
-from sqlalchemy import Column, String, Text, DateTime, Integer
+from sqlalchemy import Column, String, Text, DateTime, Integer, Boolean
 from sqlalchemy.orm import declarative_base, Session
 
 from .const import (
@@ -38,6 +38,19 @@ class ConversationMessage(Base):
     tool_calls = Column(Text, nullable=True)  # JSON
     tool_results = Column(Text, nullable=True)  # JSON
     extra_data = Column(Text, nullable=True)  # JSON (renamed from metadata which is reserved)
+
+
+class Conversation(Base):
+    """Model for conversations (groups of messages)."""
+
+    __tablename__ = "ha_mcp_client_conversations"
+
+    id = Column(String(255), primary_key=True)  # UUID
+    user_id = Column(String(255), nullable=False, index=True)
+    title = Column(String(500), nullable=False, default="新對話")
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False, index=True)
+    is_archived = Column(Boolean, nullable=False, default=False)
 
 
 class ConversationRecorder:
@@ -102,7 +115,10 @@ class ConversationRecorder:
             if engine is not None:
                 Base.metadata.create_all(
                     engine,
-                    tables=[ConversationMessage.__table__],
+                    tables=[
+                        ConversationMessage.__table__,
+                        Conversation.__table__,
+                    ],
                     checkfirst=True,
                 )
 
@@ -170,6 +186,223 @@ class ConversationRecorder:
             await recorder.async_add_executor_job(_record)
         except Exception as e:
             _LOGGER.error("Error recording conversation: %s", e, exc_info=True)
+
+    # ── Conversation CRUD ──────────────────────────────────────
+
+    async def list_conversations(
+        self,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all non-archived conversations for a user, newest first."""
+        recorder = get_instance(self.hass)
+
+        def _list():
+            with Session(recorder.engine) as session:
+                rows = (
+                    session.query(Conversation)
+                    .filter(
+                        Conversation.user_id == user_id,
+                        Conversation.is_archived == False,  # noqa: E712
+                    )
+                    .order_by(Conversation.updated_at.desc())
+                    .all()
+                )
+                return [
+                    {
+                        "id": r.id,
+                        "title": r.title,
+                        "created_at": r.created_at.isoformat(),
+                        "updated_at": r.updated_at.isoformat(),
+                    }
+                    for r in rows
+                ]
+
+        try:
+            return await recorder.async_add_executor_job(_list)
+        except Exception as e:
+            _LOGGER.error("Error listing conversations: %s", e)
+            return []
+
+    async def create_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        title: str = "新對話",
+    ) -> dict[str, Any]:
+        """Create a new conversation."""
+        recorder = get_instance(self.hass)
+        now = datetime.now(timezone.utc)
+
+        def _create():
+            with Session(recorder.engine) as session:
+                conv = Conversation(
+                    id=conversation_id,
+                    user_id=user_id,
+                    title=title,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(conv)
+                session.commit()
+
+        try:
+            await recorder.async_add_executor_job(_create)
+            return {
+                "id": conversation_id,
+                "title": title,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+        except Exception as e:
+            _LOGGER.error("Error creating conversation: %s", e)
+            return {}
+
+    async def update_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+        title: str | None = None,
+        is_archived: bool | None = None,
+    ) -> bool:
+        """Update a conversation's title or archive status."""
+        recorder = get_instance(self.hass)
+
+        def _update():
+            with Session(recorder.engine) as session:
+                conv = (
+                    session.query(Conversation)
+                    .filter(
+                        Conversation.id == conversation_id,
+                        Conversation.user_id == user_id,
+                    )
+                    .first()
+                )
+                if not conv:
+                    return False
+                if title is not None:
+                    conv.title = title
+                if is_archived is not None:
+                    conv.is_archived = is_archived
+                conv.updated_at = datetime.now(timezone.utc)
+                session.commit()
+                return True
+
+        try:
+            return await recorder.async_add_executor_job(_update)
+        except Exception as e:
+            _LOGGER.error("Error updating conversation: %s", e)
+            return False
+
+    async def touch_conversation(
+        self,
+        conversation_id: str,
+    ) -> None:
+        """Update the updated_at timestamp for a conversation."""
+        recorder = get_instance(self.hass)
+
+        def _touch():
+            with Session(recorder.engine) as session:
+                conv = (
+                    session.query(Conversation)
+                    .filter(Conversation.id == conversation_id)
+                    .first()
+                )
+                if conv:
+                    conv.updated_at = datetime.now(timezone.utc)
+                    session.commit()
+
+        try:
+            await recorder.async_add_executor_job(_touch)
+        except Exception as e:
+            _LOGGER.error("Error touching conversation: %s", e)
+
+    async def get_conversation(
+        self,
+        conversation_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Get a single conversation by ID, verifying ownership."""
+        recorder = get_instance(self.hass)
+
+        def _get():
+            with Session(recorder.engine) as session:
+                conv = (
+                    session.query(Conversation)
+                    .filter(
+                        Conversation.id == conversation_id,
+                        Conversation.user_id == user_id,
+                    )
+                    .first()
+                )
+                if not conv:
+                    return None
+                return {
+                    "id": conv.id,
+                    "title": conv.title,
+                    "created_at": conv.created_at.isoformat(),
+                    "updated_at": conv.updated_at.isoformat(),
+                    "is_archived": conv.is_archived,
+                }
+
+        try:
+            return await recorder.async_add_executor_job(_get)
+        except Exception as e:
+            _LOGGER.error("Error getting conversation: %s", e)
+            return None
+
+    async def get_conversation_messages(
+        self,
+        conversation_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get messages for a specific conversation, oldest first."""
+        recorder = get_instance(self.hass)
+
+        def _get_msgs():
+            with Session(recorder.engine) as session:
+                query = (
+                    session.query(ConversationMessage)
+                    .filter(ConversationMessage.conversation_id == conversation_id)
+                    .order_by(ConversationMessage.timestamp.asc())
+                )
+                if offset:
+                    query = query.offset(offset)
+                query = query.limit(limit)
+
+                results = []
+                for msg in query.all():
+                    parsed_tool_calls = None
+                    if msg.tool_calls:
+                        try:
+                            parsed_tool_calls = json.loads(msg.tool_calls)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    parsed_tool_results = None
+                    if msg.tool_results:
+                        try:
+                            parsed_tool_results = json.loads(msg.tool_results)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
+                    results.append(
+                        {
+                            "id": msg.id,
+                            "role": msg.role,
+                            "content": msg.content,
+                            "timestamp": msg.timestamp.isoformat(),
+                            "tool_calls": parsed_tool_calls,
+                            "tool_results": parsed_tool_results,
+                        }
+                    )
+                return results
+
+        try:
+            return await recorder.async_add_executor_job(_get_msgs)
+        except Exception as e:
+            _LOGGER.error("Error getting conversation messages: %s", e)
+            return []
 
     async def _cleanup_old_records(self, _now: datetime) -> None:
         """Clean up old conversation records."""

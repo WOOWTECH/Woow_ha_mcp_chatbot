@@ -141,3 +141,13 @@ ATTR_MESSAGE: Final = "message"
 ATTR_RESPONSE: Final = "response"
 ATTR_TOOL_CALLS: Final = "tool_calls"
 ATTR_TIMESTAMP: Final = "timestamp"
+
+# Chat Panel
+PANEL_URL: Final = "ha-mcp-chat"
+PANEL_TITLE: Final = "AI 聊天"
+PANEL_ICON: Final = "mdi:robot-happy-outline"
+PANEL_FRONTEND_PATH: Final = f"/{DOMAIN}/panel"
+
+# input_text entities
+INPUT_TEXT_USER: Final = f"input_text.{DOMAIN}_user_input"
+INPUT_TEXT_AI: Final = f"input_text.{DOMAIN}_ai_response"

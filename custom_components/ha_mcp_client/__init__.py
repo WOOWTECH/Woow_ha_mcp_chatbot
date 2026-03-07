@@ -1,11 +1,17 @@
 """HA MCP Client integration for Home Assistant."""
 
 import logging
+from pathlib import Path
 from typing import Any
 
+from homeassistant.components.frontend import (
+    async_register_built_in_panel,
+    async_remove_panel,
+)
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, Event, callback
 from homeassistant.exceptions import HomeAssistantError
 import voluptuous as vol
 
@@ -16,10 +22,20 @@ from .const import (
     SERVICE_CLEAR_HISTORY,
     SERVICE_EXPORT_HISTORY,
     ATTR_USER_ID,
+    PANEL_URL,
+    PANEL_TITLE,
+    PANEL_ICON,
+    INPUT_TEXT_USER,
+    INPUT_TEXT_AI,
 )
 from .mcp.server import MCPServer
 from .mcp.tools import ToolRegistry
 from .conversation_recorder import ConversationRecorder
+from .views import (
+    ConversationsListView,
+    ConversationDetailView,
+    ConversationMessagesView,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +78,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Register services
         await _async_register_services(hass)
 
+        # Register REST API views (idempotent – HA ignores duplicates)
+        hass.http.register_view(ConversationsListView())
+        hass.http.register_view(ConversationDetailView())
+        hass.http.register_view(ConversationMessagesView())
+
+        # Register static frontend path + sidebar panel
+        frontend_dir = Path(__file__).parent / "frontend"
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(f"/{DOMAIN}/panel", str(frontend_dir), False)]
+        )
+        # Use built-in iframe panel
+        async_register_built_in_panel(
+            hass,
+            component_name="iframe",
+            sidebar_title=PANEL_TITLE,
+            sidebar_icon=PANEL_ICON,
+            frontend_url_path=PANEL_URL,
+            config={"url": f"/{DOMAIN}/panel/index.html"},
+            require_admin=False,
+        )
+
+        # Setup input_text state listener for bidirectional sync
+        await _async_setup_input_text_listener(hass, data)
+
         # Listen for options updates
         entry.async_on_unload(entry.add_update_listener(async_update_options))
 
@@ -95,10 +135,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN].pop(entry.entry_id, None)
 
-    # Remove services if no more entries
+    # Remove services and panel if no more entries
     if not hass.data[DOMAIN]:
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_HISTORY)
         hass.services.async_remove(DOMAIN, SERVICE_EXPORT_HISTORY)
+        async_remove_panel(hass, PANEL_URL)
 
     return True
 
@@ -196,3 +237,94 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 }
             ),
         )
+
+
+async def _async_setup_input_text_listener(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> None:
+    """Listen for input_text.mcp_user_input changes and trigger AI conversation."""
+    # Flag to prevent infinite loop (we write → triggers event → we write again)
+    _syncing = {"active": False}
+
+    @callback
+    def _on_input_text_change(event: Event) -> None:
+        """Handle input_text state change."""
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        if not new_state or not new_state.state:
+            return
+
+        entity_id = new_state.entity_id
+        if entity_id != INPUT_TEXT_USER:
+            return
+
+        # Skip if we triggered this change ourselves
+        if _syncing["active"]:
+            return
+
+        # Skip if state hasn't actually changed
+        if old_state and old_state.state == new_state.state:
+            return
+
+        user_text = new_state.state.strip()
+        if not user_text:
+            return
+
+        hass.async_create_task(_process_input_text_message(hass, user_text, _syncing))
+
+    hass.bus.async_listen("state_changed", _on_input_text_change)
+
+    # Initialize input_text states so they appear in HA
+    hass.states.async_set(
+        INPUT_TEXT_USER,
+        "",
+        {"friendly_name": "MCP 使用者輸入", "icon": "mdi:account-voice"},
+    )
+    hass.states.async_set(
+        INPUT_TEXT_AI,
+        "",
+        {"friendly_name": "MCP AI 回覆", "icon": "mdi:robot"},
+    )
+
+
+async def _process_input_text_message(
+    hass: HomeAssistant, text: str, syncing: dict
+) -> None:
+    """Process a message received from input_text and send to AI."""
+    from .views import _get_agent_id
+
+    agent_id = _get_agent_id(hass)
+    if not agent_id:
+        _LOGGER.warning("No conversation agent found for input_text processing")
+        return
+
+    try:
+        result = await hass.services.async_call(
+            "conversation",
+            "process",
+            {"text": text, "agent_id": agent_id},
+            blocking=True,
+            return_response=True,
+        )
+
+        ai_response = ""
+        if result and "response" in result:
+            speech = result["response"].get("speech", {})
+            if isinstance(speech, dict):
+                ai_response = speech.get("plain", {}).get("speech", "")
+            elif isinstance(speech, str):
+                ai_response = speech
+
+        # Update AI response entity (with loop prevention)
+        syncing["active"] = True
+        try:
+            hass.states.async_set(
+                INPUT_TEXT_AI,
+                ai_response[:255],
+                {"friendly_name": "MCP AI 回覆", "icon": "mdi:robot"},
+            )
+        finally:
+            syncing["active"] = False
+
+    except Exception as e:
+        _LOGGER.error("Error processing input_text message: %s", e)

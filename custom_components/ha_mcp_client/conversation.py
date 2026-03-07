@@ -33,6 +33,8 @@ from .const import (
     AI_SERVICE_OPENAI,
     AI_SERVICE_OLLAMA,
     AI_SERVICE_OPENAI_COMPATIBLE,
+    INPUT_TEXT_USER,
+    INPUT_TEXT_AI,
 )
 from .ai_services import (
     AIServiceProvider,
@@ -348,6 +350,21 @@ class HAMCPConversationEntity(ConversationEntity):
                 "assistant_message": assistant_message,
             },
         )
+
+        # Sync to input_text entities
+        try:
+            self.hass.states.async_set(
+                INPUT_TEXT_USER,
+                user_message[:255],
+                {"friendly_name": "MCP 使用者輸入", "icon": "mdi:account-voice"},
+            )
+            self.hass.states.async_set(
+                INPUT_TEXT_AI,
+                assistant_message[:255],
+                {"friendly_name": "MCP AI 回覆", "icon": "mdi:robot"},
+            )
+        except Exception as e:
+            _LOGGER.warning("Failed to sync input_text: %s", e)
 
     async def _load_history_from_recorder(self, user_id: str) -> list[Message]:
         """Load conversation history from recorder for a user."""
