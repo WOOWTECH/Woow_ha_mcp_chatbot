@@ -859,11 +859,11 @@ NEVER call create_scene without the 'entities' parameter!""",
                         },
                         "start": {
                             "type": "string",
-                            "description": "Start datetime in ISO format (e.g., '2024-01-15T10:00:00')",
+                            "description": "Start datetime in ISO format (e.g., '2024-01-15T10:00:00') or date-only for all-day events (e.g., '2024-01-15')",
                         },
                         "end": {
                             "type": "string",
-                            "description": "End datetime in ISO format (e.g., '2024-01-15T11:00:00')",
+                            "description": "End datetime in ISO format (e.g., '2024-01-15T11:00:00') or date-only for all-day events (e.g., '2024-01-16')",
                         },
                         "description": {
                             "type": "string",
@@ -872,6 +872,10 @@ NEVER call create_scene without the 'entities' parameter!""",
                         "location": {
                             "type": "string",
                             "description": "Optional event location",
+                        },
+                        "all_day": {
+                            "type": "boolean",
+                            "description": "If true, creates an all-day event. Also auto-detected when start/end are date-only strings.",
                         },
                     },
                     "required": ["calendar_entity_id", "summary", "start", "end"],
@@ -1427,6 +1431,7 @@ NEVER call create_scene without the 'entities' parameter!""",
         end: str,
         description: str | None = None,
         location: str | None = None,
+        all_day: bool = False,
     ) -> dict[str, Any]:
         """Handle create_calendar_event tool."""
         return await create_calendar_event(
@@ -1437,4 +1442,5 @@ NEVER call create_scene without the 'entities' parameter!""",
             end=end,
             description=description,
             location=location,
+            all_day=all_day,
         )

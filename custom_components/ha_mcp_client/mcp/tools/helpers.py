@@ -454,9 +454,16 @@ async def create_script(
     icon: str | None = None,
 ) -> dict[str, Any]:
     """Create a new script in Home Assistant."""
+    import re
+    import yaml
+
     try:
         # Generate script_id from name
         script_id = name.lower().replace(" ", "_").replace("-", "_")
+        script_id = re.sub(r'[^a-z0-9_]', '', script_id)
+        if not script_id:
+            import uuid
+            script_id = f"script_{str(uuid.uuid4()).replace('-', '')[:8]}"
 
         # Build script config
         config = {
@@ -472,18 +479,27 @@ async def create_script(
         if icon:
             config["icon"] = icon
 
-        # Create via the config websocket API
-        from homeassistant.components.script import DOMAIN as SCRIPT_DOMAIN
-        from homeassistant.components.config import script as config_script
+        # Write to scripts.yaml and reload (same pattern as create_automation)
+        config_path = hass.config.path("scripts.yaml")
 
-        if hasattr(config_script, "async_create_item"):
-            await config_script.async_create_item(hass, {script_id: config})
-        else:
-            return {
-                "success": False,
-                "error": "unsupported",
-                "message": "Script creation API not available in this HA version",
-            }
+        def _write_script():
+            try:
+                with open(config_path, "r") as f:
+                    existing = yaml.safe_load(f) or {}
+            except FileNotFoundError:
+                existing = {}
+            if not isinstance(existing, dict):
+                existing = {}
+
+            existing[script_id] = config
+
+            with open(config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+
+        await hass.async_add_executor_job(_write_script)
+
+        # Reload scripts
+        await hass.services.async_call("script", "reload", blocking=True)
 
         entity_id = f"script.{script_id}"
 
@@ -572,6 +588,7 @@ async def create_calendar_event(
     end: str,
     description: str | None = None,
     location: str | None = None,
+    all_day: bool = False,
 ) -> dict[str, Any]:
     """Create a calendar event.
 
@@ -579,10 +596,13 @@ async def create_calendar_event(
         hass: Home Assistant instance
         calendar_entity_id: Calendar entity ID (e.g., 'calendar.home')
         summary: Event title/summary
-        start: Start datetime in ISO format (e.g., '2024-01-15T10:00:00')
-        end: End datetime in ISO format (e.g., '2024-01-15T11:00:00')
+        start: Start date(time). ISO format datetime (e.g., '2024-01-15T10:00:00')
+               or date-only for all-day events (e.g., '2024-01-15')
+        end: End date(time). ISO format datetime or date-only for all-day events.
         description: Optional event description
         location: Optional event location
+        all_day: If True, creates an all-day event using start_date/end_date.
+                 Also auto-detected if start/end are date-only (no 'T').
     """
     try:
         # Validate calendar entity exists
@@ -601,11 +621,24 @@ async def create_calendar_event(
                 ),
             }
 
-        service_data = {
-            "summary": summary,
-            "start_date_time": start,
-            "end_date_time": end,
-        }
+        # Auto-detect all-day events: date-only strings (no 'T') indicate all-day
+        is_all_day = all_day or ('T' not in start and 'T' not in end)
+
+        if is_all_day:
+            # Extract date-only portion (strip any time component)
+            start_date = start.split("T")[0]
+            end_date = end.split("T")[0]
+            service_data = {
+                "summary": summary,
+                "start_date": start_date,
+                "end_date": end_date,
+            }
+        else:
+            service_data = {
+                "summary": summary,
+                "start_date_time": start,
+                "end_date_time": end,
+            }
 
         if description:
             service_data["description"] = description
