@@ -151,3 +151,19 @@ PANEL_FRONTEND_PATH: Final = f"/{DOMAIN}/panel"
 # input_text entities
 INPUT_TEXT_USER: Final = f"input_text.{DOMAIN}_user_input"
 INPUT_TEXT_AI: Final = f"input_text.{DOMAIN}_ai_response"
+
+# ── AI Model Parameters ──
+CONF_TEMPERATURE: Final = "temperature"
+CONF_MAX_TOKENS: Final = "max_tokens"
+DEFAULT_TEMPERATURE: Final = 0.7
+DEFAULT_MAX_TOKENS: Final = 4096
+
+# ── Reasoning Effort ──
+CONF_REASONING_EFFORT: Final = "reasoning_effort"
+DEFAULT_REASONING_EFFORT: Final = "medium"
+REASONING_EFFORTS: Final = ["low", "medium", "high"]
+
+# ── Nanobot Memory ──
+CONF_MEMORY_WINDOW: Final = "memory_window"
+DEFAULT_MEMORY_WINDOW: Final = 50
+NANOBOT_DIR_NAME: Final = "nanobot"
