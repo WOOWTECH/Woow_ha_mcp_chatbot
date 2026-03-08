@@ -30,13 +30,21 @@ def _get_runtime(hass: HomeAssistant, entry_id: str) -> dict[str, Any]:
 
 
 def _set_runtime(hass: HomeAssistant, entry_id: str, key: str, value: Any) -> None:
-    """Set a value in runtime_settings."""
+    """Set a value in runtime_settings and persist to config_entry.data."""
     data = hass.data.get(DOMAIN, {}).get(entry_id)
     if data is None:
         return
     if "runtime_settings" not in data:
         data["runtime_settings"] = {}
     data["runtime_settings"][key] = value
+
+    # Persist to config_entry.data so it survives restarts
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry:
+        data["_skip_reload"] = True
+        new_data = dict(entry.data)
+        new_data[key] = value
+        hass.config_entries.async_update_entry(entry, data=new_data)
 
 
 async def async_setup_entry(

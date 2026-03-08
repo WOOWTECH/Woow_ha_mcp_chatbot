@@ -1982,6 +1982,432 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # ── Memory Tools ──
+        self.register(
+            ToolDefinition(
+                name="memory_get",
+                description=(
+                    "Get the current memory state: long-term memory (MEMORY.md), "
+                    "soul (SOUL.md), user profile (USER.md), and statistics."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "enum": ["all", "memory", "soul", "user", "stats"],
+                            "description": (
+                                "Which section to retrieve. "
+                                "'all' returns everything (default), "
+                                "'memory' for MEMORY.md only, "
+                                "'soul' for SOUL.md, "
+                                "'user' for USER.md, "
+                                "'stats' for memory statistics."
+                            ),
+                        },
+                    },
+                },
+                handler=self._handle_memory_get,
+                category="memory",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_save",
+                description=(
+                    "Save content to a memory file. Use this to update long-term "
+                    "memory, soul definition, or user profile."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target": {
+                            "type": "string",
+                            "enum": ["memory", "soul", "user"],
+                            "description": (
+                                "Which file to write: "
+                                "'memory' for MEMORY.md (long-term facts), "
+                                "'soul' for SOUL.md (personality), "
+                                "'user' for USER.md (user profile)."
+                            ),
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The full markdown content to write.",
+                        },
+                    },
+                    "required": ["target", "content"],
+                },
+                handler=self._handle_memory_save,
+                category="memory",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_search",
+                description=(
+                    "Search the conversation history log (HISTORY.md) using a "
+                    "regex pattern. Returns matching lines."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": (
+                                "Regex pattern to search for in HISTORY.md. "
+                                "Case-insensitive. Example: 'light.*bedroom'"
+                            ),
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Max results to return (default: 20)",
+                            "default": 20,
+                        },
+                    },
+                    "required": ["pattern"],
+                },
+                handler=self._handle_memory_search,
+                category="memory",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_append_history",
+                description=(
+                    "Append an entry to the conversation history log (HISTORY.md). "
+                    "Use [YYYY-MM-DD HH:MM] timestamp prefix for searchability."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entry": {
+                            "type": "string",
+                            "description": (
+                                "The history entry to append. Should start with "
+                                "[YYYY-MM-DD HH:MM] timestamp."
+                            ),
+                        },
+                    },
+                    "required": ["entry"],
+                },
+                handler=self._handle_memory_append_history,
+                category="memory",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="memory_consolidate",
+                description=(
+                    "Manually trigger memory consolidation. This uses the AI to "
+                    "summarize recent conversation history into long-term memory "
+                    "(MEMORY.md) and append a timestamped entry to HISTORY.md."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                handler=self._handle_memory_consolidate,
+                category="memory",
+            )
+        )
+
+        # ── Skills Tools ──
+        self.register(
+            ToolDefinition(
+                name="list_skills",
+                description=(
+                    "List all installed AI skills with their name, description, "
+                    "and always-on status."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                handler=self._handle_list_skills,
+                category="skills",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="read_skill",
+                description=(
+                    "Read the full SKILL.md content of a skill. "
+                    "Use this to learn a skill's detailed instructions before using it."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The skill name (directory name)",
+                        },
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_read_skill,
+                category="skills",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="create_skill",
+                description=(
+                    "Create a new AI skill. Provide name, description, "
+                    "and the markdown body content."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Skill name (lowercase, alphanumeric + hyphens/underscores)",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "One-line description of what the skill does",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The markdown body content (instructions for the AI)",
+                        },
+                        "always": {
+                            "type": "boolean",
+                            "description": "If true, always inject into system prompt (default: false)",
+                            "default": False,
+                        },
+                    },
+                    "required": ["name", "description", "content"],
+                },
+                handler=self._handle_create_skill,
+                category="skills",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="update_skill",
+                description=(
+                    "Update an existing skill's content, description, or always-on status."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The skill name to update",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "New full content (frontmatter + body). Omit to keep current body.",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description. Omit to keep current.",
+                        },
+                        "always": {
+                            "type": "boolean",
+                            "description": "New always-on status. Omit to keep current.",
+                        },
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_update_skill,
+                category="skills",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="delete_skill",
+                description="Delete a skill and its directory.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The skill name to delete",
+                        },
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_delete_skill,
+                category="skills",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="toggle_skill",
+                description="Toggle a skill's always-on injection into the system prompt.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The skill name to toggle",
+                        },
+                        "always": {
+                            "type": "boolean",
+                            "description": "True to always inject, false for on-demand only",
+                        },
+                    },
+                    "required": ["name", "always"],
+                },
+                handler=self._handle_toggle_skill,
+                category="skills",
+            )
+        )
+
+        # ── Cron Scheduling Tools ──
+
+        self.register(
+            ToolDefinition(
+                name="cron_add",
+                description=(
+                    "Add a scheduled cron job. Schedule types: "
+                    "'at' (one-time at Unix ms), 'every' (interval in ms), "
+                    "'cron' (cron expression like '0 8 * * *'). "
+                    "Payload types: 'agent_turn' (trigger AI conversation with message), "
+                    "'system_event' (fire HA event)."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Human-readable job name",
+                        },
+                        "schedule": {
+                            "type": "object",
+                            "description": (
+                                "Schedule config. Examples: "
+                                "{\"kind\":\"every\",\"every_ms\":3600000} for hourly, "
+                                "{\"kind\":\"cron\",\"cron\":\"0 8 * * *\",\"tz\":\"Asia/Taipei\"} for daily 8am, "
+                                "{\"kind\":\"at\",\"at_ms\":1710000000000} for one-time"
+                            ),
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["at", "every", "cron"],
+                                },
+                                "at_ms": {"type": "integer"},
+                                "every_ms": {"type": "integer"},
+                                "cron": {"type": "string"},
+                                "tz": {"type": "string"},
+                            },
+                            "required": ["kind"],
+                        },
+                        "payload": {
+                            "type": "object",
+                            "description": "Payload config: {\"kind\":\"agent_turn\",\"message\":\"...\"}",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["agent_turn", "system_event"],
+                                },
+                                "message": {"type": "string"},
+                            },
+                        },
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Whether the job is enabled (default: true)",
+                        },
+                        "delete_after_run": {
+                            "type": "boolean",
+                            "description": "Delete job after first execution (default: false)",
+                        },
+                    },
+                    "required": ["name", "schedule"],
+                },
+                handler=self._handle_cron_add,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="cron_list",
+                description="List all scheduled cron jobs with their status and next run time.",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                handler=self._handle_cron_list,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="cron_remove",
+                description="Remove a scheduled cron job by its ID.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The job ID to remove",
+                        },
+                    },
+                    "required": ["job_id"],
+                },
+                handler=self._handle_cron_remove,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="cron_update",
+                description="Update a cron job's fields (name, schedule, payload, enabled).",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The job ID to update",
+                        },
+                        "updates": {
+                            "type": "object",
+                            "description": (
+                                "Fields to update. Can include: name, enabled, "
+                                "delete_after_run, schedule, payload"
+                            ),
+                        },
+                    },
+                    "required": ["job_id", "updates"],
+                },
+                handler=self._handle_cron_update,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="cron_trigger",
+                description="Manually trigger a cron job execution immediately.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The job ID to trigger",
+                        },
+                    },
+                    "required": ["job_id"],
+                },
+                handler=self._handle_cron_trigger,
+                category="cron",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
@@ -3118,3 +3544,332 @@ NEVER call create_scene without the 'entities' parameter!""",
             action=action,
             name=name,
         )
+
+    # ── Memory tool handlers ──
+
+    def _get_memory_store(self):
+        """Get the MemoryStore instance from hass.data."""
+        from ...const import DOMAIN
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict) and "memory_store" in entry_data:
+                return entry_data["memory_store"]
+        return None
+
+    async def _handle_memory_get(
+        self,
+        section: str = "all",
+    ) -> dict[str, Any]:
+        """Handle memory_get tool."""
+        store = self._get_memory_store()
+        if not store:
+            return {"error": "Memory store not available"}
+
+        result: dict[str, Any] = {}
+        if section in ("all", "memory"):
+            result["memory"] = await store.read_long_term()
+        if section in ("all", "soul"):
+            result["soul"] = await store.read_soul()
+        if section in ("all", "user"):
+            result["user"] = await store.read_user()
+        if section in ("all", "stats"):
+            result["stats"] = await store.get_stats()
+        return result
+
+    async def _handle_memory_save(
+        self,
+        target: str,
+        content: str,
+    ) -> dict[str, Any]:
+        """Handle memory_save tool."""
+        store = self._get_memory_store()
+        if not store:
+            return {"error": "Memory store not available"}
+
+        if target == "memory":
+            await store.write_long_term(content)
+        elif target == "soul":
+            await store.write_soul(content)
+        elif target == "user":
+            await store.write_user(content)
+        else:
+            return {"error": f"Unknown target: {target}"}
+
+        return {"success": True, "target": target, "length": len(content)}
+
+    async def _handle_memory_search(
+        self,
+        pattern: str,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Handle memory_search tool."""
+        store = self._get_memory_store()
+        if not store:
+            return {"error": "Memory store not available"}
+
+        results = await store.search_history(pattern)
+        truncated = len(results) > limit
+        results = results[:limit]
+        return {
+            "pattern": pattern,
+            "matches": results,
+            "count": len(results),
+            "truncated": truncated,
+        }
+
+    async def _handle_memory_append_history(
+        self,
+        entry: str,
+    ) -> dict[str, Any]:
+        """Handle memory_append_history tool."""
+        store = self._get_memory_store()
+        if not store:
+            return {"error": "Memory store not available"}
+
+        await store.append_history(entry)
+        return {"success": True, "entry_length": len(entry)}
+
+    async def _handle_memory_consolidate(self) -> dict[str, Any]:
+        """Handle memory_consolidate tool — trigger AI-driven consolidation."""
+        from ...const import DOMAIN, CONF_MEMORY_WINDOW, DEFAULT_MEMORY_WINDOW
+
+        store = self._get_memory_store()
+        if not store:
+            return {"error": "Memory store not available"}
+
+        # Find AI service from the conversation entity
+        ai_service = None
+        recorder = None
+        memory_window = DEFAULT_MEMORY_WINDOW
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict):
+                if "recorder" in entry_data:
+                    recorder = entry_data["recorder"]
+                overrides = entry_data.get("runtime_settings", {})
+                memory_window = overrides.get(CONF_MEMORY_WINDOW, memory_window)
+
+        # Look up conversation entity's AI service
+        entity_comp = self.hass.data.get("entity_components", {}).get("conversation")
+        if entity_comp:
+            for entity in entity_comp.entities:
+                if hasattr(entity, "_ai_service") and entity._ai_service:
+                    ai_service = entity._ai_service
+                    break
+
+        if not ai_service:
+            return {"error": "AI service not available for consolidation"}
+
+        # Gather recent messages from the recorder
+        messages: list[dict[str, Any]] = []
+        if recorder:
+            # Get the most recent conversation across all users
+            from ...conversation_recorder import Conversation as ConvModel
+            from homeassistant.components.recorder import get_instance
+            from sqlalchemy.orm import Session as SASession
+
+            ha_recorder = get_instance(self.hass)
+
+            def _get_recent_conv():
+                with SASession(ha_recorder.engine) as session:
+                    row = (
+                        session.query(ConvModel)
+                        .filter(ConvModel.is_archived == False)  # noqa: E712
+                        .order_by(ConvModel.updated_at.desc())
+                        .first()
+                    )
+                    return row.id if row else None
+
+            conv_id = await ha_recorder.async_add_executor_job(_get_recent_conv)
+
+            if conv_id:
+                msg_records = await recorder.get_conversation_messages(
+                    conv_id, limit=memory_window
+                )
+                for m in msg_records:
+                    role = m.get("role", "user") if isinstance(m, dict) else getattr(m, "role", "user")
+                    content = m.get("content", "") if isinstance(m, dict) else getattr(m, "content", "")
+                    messages.append({
+                        "role": role,
+                        "content": content or "",
+                    })
+
+        if not messages:
+            return {"info": "No recent messages to consolidate"}
+
+        success = await store.consolidate(
+            conversation_id="manual_consolidation",
+            messages=messages,
+            ai_service=ai_service,
+            memory_window=memory_window,
+        )
+
+        if success:
+            stats = await store.get_stats()
+            return {"success": True, "stats": stats}
+        return {"error": "Consolidation failed"}
+
+    # ── Skills tool handlers ──
+
+    def _get_skills_loader(self):
+        """Get the SkillsLoader instance from hass.data."""
+        from ...const import DOMAIN
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict) and "skills_loader" in entry_data:
+                return entry_data["skills_loader"]
+        return None
+
+    async def _handle_list_skills(self) -> dict[str, Any]:
+        """Handle list_skills tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        skills = await loader.list_skills()
+        stats = await loader.get_stats()
+        return {"skills": skills, "stats": stats}
+
+    async def _handle_read_skill(self, name: str) -> dict[str, Any]:
+        """Handle read_skill tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        content = await loader.read_skill(name)
+        if content is None:
+            return {"error": f"Skill '{name}' not found"}
+        return {"name": name, "content": content}
+
+    async def _handle_create_skill(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        always: bool = False,
+    ) -> dict[str, Any]:
+        """Handle create_skill tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        return await loader.create_skill(
+            name=name,
+            description=description,
+            content=content,
+            always=always,
+        )
+
+    async def _handle_update_skill(
+        self,
+        name: str,
+        content: str | None = None,
+        description: str | None = None,
+        always: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_skill tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        return await loader.update_skill(
+            name=name,
+            content=content,
+            description=description,
+            always=always,
+        )
+
+    async def _handle_delete_skill(self, name: str) -> dict[str, Any]:
+        """Handle delete_skill tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        return await loader.delete_skill(name)
+
+    async def _handle_toggle_skill(
+        self, name: str, always: bool
+    ) -> dict[str, Any]:
+        """Handle toggle_skill tool."""
+        loader = self._get_skills_loader()
+        if not loader:
+            return {"error": "Skills loader not available"}
+
+        return await loader.toggle_skill(name, always)
+
+    # ── Cron tool handlers ──
+
+    def _get_cron_service(self):
+        """Get the CronService instance from hass.data."""
+        from ...const import DOMAIN
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            if isinstance(entry_data, dict) and "cron_service" in entry_data:
+                return entry_data["cron_service"]
+        return None
+
+    async def _handle_cron_add(
+        self,
+        name: str,
+        schedule: dict[str, Any],
+        payload: dict[str, Any] | None = None,
+        enabled: bool = True,
+        delete_after_run: bool = False,
+    ) -> dict[str, Any]:
+        """Handle cron_add tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        job = await svc.add_job(
+            name=name,
+            schedule=schedule,
+            payload=payload,
+            enabled=enabled,
+            delete_after_run=delete_after_run,
+        )
+        return job.to_dict()
+
+    async def _handle_cron_list(self) -> dict[str, Any]:
+        """Handle cron_list tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        jobs = await svc.list_jobs()
+        stats = await svc.get_stats()
+        return {
+            "jobs": [j.to_dict() for j in jobs],
+            "stats": stats,
+        }
+
+    async def _handle_cron_remove(self, job_id: str) -> dict[str, Any]:
+        """Handle cron_remove tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        ok = await svc.remove_job(job_id)
+        if not ok:
+            return {"error": f"Job '{job_id}' not found"}
+        return {"success": True, "removed": job_id}
+
+    async def _handle_cron_update(
+        self, job_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Handle cron_update tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        job = await svc.update_job(job_id, updates)
+        if not job:
+            return {"error": f"Job '{job_id}' not found"}
+        return job.to_dict()
+
+    async def _handle_cron_trigger(self, job_id: str) -> dict[str, Any]:
+        """Handle cron_trigger tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        ok = await svc.trigger_job(job_id)
+        if not ok:
+            return {"error": f"Job '{job_id}' not found"}
+        return {"success": True, "triggered": job_id}

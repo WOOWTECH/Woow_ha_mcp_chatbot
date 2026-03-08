@@ -27,14 +27,26 @@ from .const import (
     PANEL_ICON,
     INPUT_TEXT_USER,
     INPUT_TEXT_AI,
+    NANOBOT_DIR_NAME,
 )
 from .mcp.server import MCPServer
 from .mcp.tools import ToolRegistry
 from .conversation_recorder import ConversationRecorder
+from .nanobot import MemoryStore, SkillsLoader, CronService
 from .views import (
     ConversationsListView,
     ConversationDetailView,
     ConversationMessagesView,
+    MemoryView,
+    MemorySectionView,
+    MemorySearchView,
+    MemoryConsolidateView,
+    SkillsListView,
+    SkillDetailView,
+    CronJobsListView,
+    CronJobDetailView,
+    CronJobTriggerView,
+    SettingsView,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,9 +74,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create tool registry
     tool_registry = ToolRegistry(hass)
 
+    # Initialize nanobot modules
+    nanobot_dir = Path(hass.config.path(NANOBOT_DIR_NAME))
+    memory_store = MemoryStore(hass, nanobot_dir)
+    await memory_store.async_setup()
+    skills_loader = SkillsLoader(hass, nanobot_dir / "skills")
+    await skills_loader.async_setup()
+    cron_service = CronService(hass, nanobot_dir / "cron")
+    await cron_service.async_setup()
+
     # Store data for this entry
     data: dict[str, Any] = {
         "tool_registry": tool_registry,
+        "memory_store": memory_store,
+        "skills_loader": skills_loader,
+        "cron_service": cron_service,
         "enable_mcp_server": entry.data.get(CONF_ENABLE_MCP_SERVER, True),
         "enable_conversation": entry.data.get(CONF_ENABLE_CONVERSATION, True),
     }
@@ -97,6 +121,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(ConversationsListView())
         hass.http.register_view(ConversationDetailView())
         hass.http.register_view(ConversationMessagesView())
+        hass.http.register_view(MemoryView())
+        hass.http.register_view(MemorySearchView())
+        hass.http.register_view(MemoryConsolidateView())
+        hass.http.register_view(MemorySectionView())
+        hass.http.register_view(SkillsListView())
+        hass.http.register_view(SkillDetailView())
+        hass.http.register_view(CronJobsListView())
+        hass.http.register_view(CronJobTriggerView())
+        hass.http.register_view(CronJobDetailView())
+        hass.http.register_view(SettingsView())
 
         # Register static frontend path + sidebar panel
         frontend_dir = Path(__file__).parent / "frontend"
@@ -128,6 +162,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await data["mcp_server"].stop()
         if "recorder" in data:
             await data["recorder"].async_unload()
+        if "cron_service" in data:
+            await data["cron_service"].async_stop()
         raise
 
 
@@ -143,6 +179,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Unload recorder
         if "recorder" in data:
             await data["recorder"].async_unload()
+
+        # Stop cron service
+        if "cron_service" in data:
+            await data["cron_service"].async_stop()
 
         # Unload platforms
         platforms_to_unload = list(ALWAYS_PLATFORMS)
@@ -163,6 +203,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
+    # Skip reload if the update was from runtime entity persistence
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    if isinstance(data, dict) and data.pop("_skip_reload", False):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
