@@ -172,8 +172,22 @@ class HAMCPConversationEntity(ConversationEntity):
 
         # Enforce max messages per conversation
         if len(messages) >= self._max_messages_per_conversation:
-            # Keep last N-1 messages to make room for new one
-            self._conversation_history[conversation_id] = messages[-(self._max_messages_per_conversation - 1):]
+            # Trim to make room, but ensure we don't cut mid-tool-exchange.
+            # Walk forward from the trim point until we find a safe boundary
+            # (a USER or standalone ASSISTANT message without pending tool calls).
+            target = self._max_messages_per_conversation - 1
+            trim_start = len(messages) - target
+            # Move trim_start forward to avoid orphaned TOOL / mid-exchange messages
+            while trim_start < len(messages):
+                msg = messages[trim_start]
+                if msg.role == MessageRole.USER:
+                    break  # Safe: starts with a user turn
+                if msg.role == MessageRole.ASSISTANT and not msg.tool_calls:
+                    break  # Safe: standalone assistant reply
+                trim_start += 1
+            if trim_start >= len(messages):
+                trim_start = len(messages) - 1  # Keep at least the last message
+            self._conversation_history[conversation_id] = messages[trim_start:]
             messages = self._conversation_history[conversation_id]
 
         # Add user message

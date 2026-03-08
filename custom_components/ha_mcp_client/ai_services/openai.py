@@ -97,7 +97,7 @@ class OpenAIService(AIServiceProvider):
             tool_calls = []
 
             if message.tool_calls:
-                for tc in message.tool_calls:
+                for i, tc in enumerate(message.tool_calls):
                     try:
                         args = json.loads(tc.function.arguments)
                     except (json.JSONDecodeError, TypeError) as parse_err:
@@ -107,14 +107,17 @@ class OpenAIService(AIServiceProvider):
                             parse_err,
                         )
                         args = {}
+                    # Guard against null tool_call.id (some OpenAI-compatible APIs)
+                    tc_id = tc.id or f"call_{i}"
                     _LOGGER.debug(
-                        "OpenAI tool call: %s with args: %s",
+                        "OpenAI tool call: %s (id=%s) with args: %s",
                         tc.function.name,
+                        tc_id,
                         args,
                     )
                     tool_calls.append(
                         ToolCall(
-                            id=tc.id,
+                            id=tc_id,
                             name=tc.function.name,
                             arguments=args,
                         )
@@ -177,19 +180,21 @@ class OpenAIService(AIServiceProvider):
             elif msg.role == MessageRole.ASSISTANT:
                 openai_msg: dict[str, Any] = {
                     "role": "assistant",
-                    "content": msg.content,
+                    # OpenAI-compatible APIs (e.g. Gemini) may reject empty
+                    # string content when tool_calls are present; use None.
+                    "content": msg.content or None,
                 }
                 if msg.tool_calls:
                     openai_msg["tool_calls"] = [
                         {
-                            "id": tc.id,
+                            "id": tc.id or f"call_{i}",
                             "type": "function",
                             "function": {
                                 "name": tc.name,
                                 "arguments": json.dumps(tc.arguments),
                             },
                         }
-                        for tc in msg.tool_calls
+                        for i, tc in enumerate(msg.tool_calls)
                     ]
                 openai_messages.append(openai_msg)
             elif msg.role == MessageRole.TOOL:
