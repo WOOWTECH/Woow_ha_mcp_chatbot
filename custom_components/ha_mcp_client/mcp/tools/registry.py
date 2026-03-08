@@ -48,6 +48,14 @@ from .helpers import (
     control_fan,
     delete_automation,
     delete_script,
+    control_media_player,
+    control_lock,
+    speak_tts,
+    control_persistent_notification,
+    control_counter,
+    manage_backup,
+    control_camera,
+    control_switch,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1418,6 +1426,260 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # ===== Phase 3: P2 domain coverage =====
+
+        self.register(
+            ToolDefinition(
+                name="control_media_player",
+                description="Control a media player (play, pause, volume, source, shuffle, repeat)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Media player entity ID (e.g., 'media_player.living_room')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "media_play", "media_pause", "media_stop",
+                                "media_next_track", "media_previous_track",
+                                "volume_up", "volume_down", "volume_set", "volume_mute",
+                                "turn_on", "turn_off", "toggle",
+                                "select_source", "play_media", "shuffle_set", "repeat_set",
+                            ],
+                            "description": "Action to perform",
+                        },
+                        "volume_level": {
+                            "type": "number",
+                            "description": "Volume level 0.0-1.0 (for volume_set)",
+                        },
+                        "is_volume_muted": {
+                            "type": "boolean",
+                            "description": "Mute state (for volume_mute)",
+                        },
+                        "media_content_id": {
+                            "type": "string",
+                            "description": "Media content ID (for play_media)",
+                        },
+                        "media_content_type": {
+                            "type": "string",
+                            "description": "Media content type: music, video, playlist, etc. (for play_media)",
+                        },
+                        "source": {
+                            "type": "string",
+                            "description": "Input source name (for select_source)",
+                        },
+                        "shuffle": {
+                            "type": "boolean",
+                            "description": "Shuffle mode (for shuffle_set)",
+                        },
+                        "repeat": {
+                            "type": "string",
+                            "enum": ["off", "all", "one"],
+                            "description": "Repeat mode (for repeat_set)",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_media_player,
+                category="media_player",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_lock",
+                description="Control a smart lock (lock, unlock, open)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Lock entity ID (e.g., 'lock.front_door')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["lock", "unlock", "open"],
+                            "description": "Action to perform",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_lock,
+                category="lock",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="speak_tts",
+                description="Speak text via TTS (text-to-speech) service",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "TTS entity ID (e.g., tts.google_translate_en_com)",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Text to speak",
+                        },
+                        "media_player_entity_id": {
+                            "type": "string",
+                            "description": "Optional media player entity ID to play on",
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Language code (e.g., 'zh-TW', 'en-US')",
+                        },
+                        "cache": {
+                            "type": "boolean",
+                            "description": "Whether to cache TTS audio (default: true)",
+                        },
+                    },
+                    "required": ["entity_id", "message"],
+                },
+                handler=self._handle_speak_tts,
+                category="tts",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_persistent_notification",
+                description="Create, dismiss, or dismiss all persistent notifications in HA frontend",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["create", "dismiss", "dismiss_all"],
+                            "description": "Action to perform",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Notification message (required for create)",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Notification title (optional, for create)",
+                        },
+                        "notification_id": {
+                            "type": "string",
+                            "description": "Notification ID (required for dismiss; optional for create)",
+                        },
+                    },
+                    "required": ["action"],
+                },
+                handler=self._handle_control_persistent_notification,
+                category="notification",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_counter",
+                description="Control a counter entity (increment, decrement, reset, set value)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Counter entity ID (e.g., 'counter.guests')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["increment", "decrement", "reset", "set_value"],
+                            "description": "Action to perform",
+                        },
+                        "value": {
+                            "type": "integer",
+                            "description": "Value for set_value action",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_counter,
+                category="counter",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="manage_backup",
+                description="Create a Home Assistant backup",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["create", "create_automatic"],
+                            "description": "Backup action (default: create)",
+                        },
+                    },
+                },
+                handler=self._handle_manage_backup,
+                category="backup",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_camera",
+                description="Control a camera (snapshot, turn on/off, motion detection)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Camera entity ID (e.g., 'camera.front_door')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "snapshot", "turn_on", "turn_off",
+                                "enable_motion_detection", "disable_motion_detection",
+                            ],
+                            "description": "Action to perform",
+                        },
+                        "filename": {
+                            "type": "string",
+                            "description": "File path for snapshot (default: /config/www/snapshot_<name>.jpg)",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_camera,
+                category="camera",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_switch",
+                description="Control a smart switch (turn on, turn off, toggle)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Switch entity ID (e.g., 'switch.garden_light')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["turn_on", "turn_off", "toggle"],
+                            "description": "Action to perform",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_switch,
+                category="switch",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
@@ -2234,4 +2496,128 @@ NEVER call create_scene without the 'entities' parameter!""",
         return await delete_script(
             self.hass,
             entity_id=entity_id,
+        )
+
+    # ===== Phase 3 handlers =====
+
+    async def _handle_control_media_player(
+        self,
+        entity_id: str,
+        action: str,
+        volume_level: float | None = None,
+        is_volume_muted: bool | None = None,
+        media_content_id: str | None = None,
+        media_content_type: str | None = None,
+        source: str | None = None,
+        shuffle: bool | None = None,
+        repeat: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_media_player tool."""
+        return await control_media_player(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            volume_level=volume_level,
+            is_volume_muted=is_volume_muted,
+            media_content_id=media_content_id,
+            media_content_type=media_content_type,
+            source=source,
+            shuffle=shuffle,
+            repeat=repeat,
+        )
+
+    async def _handle_control_lock(
+        self,
+        entity_id: str,
+        action: str,
+    ) -> dict[str, Any]:
+        """Handle control_lock tool."""
+        return await control_lock(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+        )
+
+    async def _handle_speak_tts(
+        self,
+        entity_id: str,
+        message: str,
+        media_player_entity_id: str | None = None,
+        language: str | None = None,
+        cache: bool = True,
+    ) -> dict[str, Any]:
+        """Handle speak_tts tool."""
+        return await speak_tts(
+            self.hass,
+            entity_id=entity_id,
+            message=message,
+            media_player_entity_id=media_player_entity_id,
+            language=language,
+            cache=cache,
+        )
+
+    async def _handle_control_persistent_notification(
+        self,
+        action: str,
+        message: str | None = None,
+        title: str | None = None,
+        notification_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_persistent_notification tool."""
+        return await control_persistent_notification(
+            self.hass,
+            action=action,
+            message=message,
+            title=title,
+            notification_id=notification_id,
+        )
+
+    async def _handle_control_counter(
+        self,
+        entity_id: str,
+        action: str,
+        value: int | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_counter tool."""
+        return await control_counter(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            value=value,
+        )
+
+    async def _handle_manage_backup(
+        self,
+        action: str = "create",
+    ) -> dict[str, Any]:
+        """Handle manage_backup tool."""
+        return await manage_backup(
+            self.hass,
+            action=action,
+        )
+
+    async def _handle_control_camera(
+        self,
+        entity_id: str,
+        action: str,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_camera tool."""
+        return await control_camera(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            filename=filename,
+        )
+
+    async def _handle_control_switch(
+        self,
+        entity_id: str,
+        action: str,
+    ) -> dict[str, Any]:
+        """Handle control_switch tool."""
+        return await control_switch(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
         )

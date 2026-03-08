@@ -2457,3 +2457,602 @@ async def delete_script(
             "error": "delete_failed",
             "message": f"刪除腳本失敗：{str(e)}",
         }
+
+
+# ===== Phase 3: P2 domain coverage =====
+
+
+async def control_media_player(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    volume_level: float | None = None,
+    is_volume_muted: bool | None = None,
+    media_content_id: str | None = None,
+    media_content_type: str | None = None,
+    source: str | None = None,
+    shuffle: bool | None = None,
+    repeat: str | None = None,
+) -> dict[str, Any]:
+    """Control a media player entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Media player entity ID
+        action: Action to perform (media_play, media_pause, media_stop,
+                media_next_track, media_previous_track, volume_up, volume_down,
+                volume_set, volume_mute, turn_on, turn_off, toggle,
+                select_source, play_media, shuffle_set, repeat_set)
+        volume_level: Volume level 0.0-1.0 (for volume_set)
+        is_volume_muted: Mute state (for volume_mute)
+        media_content_id: Media ID (for play_media)
+        media_content_type: Media type (for play_media)
+        source: Input source name (for select_source)
+        shuffle: Shuffle mode (for shuffle_set)
+        repeat: Repeat mode off/all/one (for repeat_set)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到媒體播放器: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "media_player":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是媒體播放器: {entity_id}",
+            }
+
+        valid_actions = {
+            "media_play", "media_pause", "media_stop",
+            "media_next_track", "media_previous_track",
+            "volume_up", "volume_down", "volume_set", "volume_mute",
+            "turn_on", "turn_off", "toggle",
+            "select_source", "play_media", "shuffle_set", "repeat_set",
+        }
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+
+        if action == "volume_set" and volume_level is not None:
+            service_data["volume_level"] = volume_level
+        elif action == "volume_mute" and is_volume_muted is not None:
+            service_data["is_volume_muted"] = is_volume_muted
+        elif action == "play_media":
+            if media_content_id is not None:
+                service_data["media_content_id"] = media_content_id
+            if media_content_type is not None:
+                service_data["media_content_type"] = media_content_type
+        elif action == "select_source" and source is not None:
+            service_data["source"] = source
+        elif action == "shuffle_set" and shuffle is not None:
+            service_data["shuffle"] = shuffle
+        elif action == "repeat_set" and repeat is not None:
+            service_data["repeat"] = repeat
+        elif action == "turn_on":
+            if volume_level is not None:
+                service_data["volume_level"] = volume_level
+            if source is not None:
+                service_data["source"] = source
+
+        await hass.services.async_call(
+            "media_player", action, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"媒體播放器 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling media player: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制媒體播放器失敗：{str(e)}",
+        }
+
+
+async def control_lock(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+) -> dict[str, Any]:
+    """Control a lock entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Lock entity ID
+        action: Action to perform (lock, unlock, open)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到門鎖: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "lock":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是門鎖: {entity_id}",
+            }
+
+        valid_actions = {"lock", "unlock", "open"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        await hass.services.async_call(
+            "lock", action,
+            service_data={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"門鎖 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling lock: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制門鎖失敗：{str(e)}",
+        }
+
+
+async def speak_tts(
+    hass: HomeAssistant,
+    entity_id: str,
+    message: str,
+    media_player_entity_id: str | None = None,
+    language: str | None = None,
+    cache: bool = True,
+) -> dict[str, Any]:
+    """Speak text via TTS service.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: TTS entity ID (e.g., tts.google_translate_en_com)
+        message: Text to speak
+        media_player_entity_id: Optional media player to play on (for tts.speak)
+        language: Language code (e.g., 'zh-TW', 'en-US')
+        cache: Whether to cache the TTS audio (default True)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到 TTS 實體: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "tts":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"entity_id 必須是 tts 域: {entity_id}",
+            }
+
+        # Find available TTS services
+        services = hass.services.async_services()
+        tts_services = services.get("tts", {})
+
+        if not tts_services:
+            return {
+                "success": False,
+                "error": "no_tts_service",
+                "message": "沒有可用的 TTS 服務",
+            }
+
+        # Prefer cloud_say > speak > first available
+        if "cloud_say" in tts_services:
+            tts_service = "cloud_say"
+        elif "speak" in tts_services:
+            tts_service = "speak"
+        else:
+            tts_service = next(iter(tts_services))
+
+        service_data: dict[str, Any] = {
+            "message": message,
+            "cache": cache,
+        }
+        if language is not None:
+            service_data["language"] = language
+
+        if tts_service == "speak":
+            # tts.speak targets TTS entity via entity_id,
+            # and uses media_player_entity_id for the speaker
+            service_data["entity_id"] = entity_id
+            if media_player_entity_id:
+                service_data["media_player_entity_id"] = media_player_entity_id
+        else:
+            # tts.cloud_say and others use entity_id for the media player
+            if media_player_entity_id:
+                service_data["entity_id"] = media_player_entity_id
+            else:
+                service_data["entity_id"] = entity_id
+
+        await hass.services.async_call(
+            "tts", tts_service, service_data=service_data, blocking=True,
+        )
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "service": f"tts.{tts_service}",
+            "message": f"已播報：{message[:50]}{'...' if len(message) > 50 else ''}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error speaking TTS: %s", e)
+        return {
+            "success": False,
+            "error": "tts_failed",
+            "message": f"TTS 播報失敗：{str(e)}",
+        }
+
+
+async def control_persistent_notification(
+    hass: HomeAssistant,
+    action: str,
+    message: str | None = None,
+    title: str | None = None,
+    notification_id: str | None = None,
+) -> dict[str, Any]:
+    """Manage persistent notifications in Home Assistant.
+
+    Args:
+        hass: Home Assistant instance
+        action: Action (create, dismiss, dismiss_all)
+        message: Notification message (required for create)
+        title: Notification title (optional, for create)
+        notification_id: Notification ID (required for dismiss; optional for create)
+    """
+    try:
+        valid_actions = {"create", "dismiss", "dismiss_all"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        if action == "create":
+            if not message:
+                return {
+                    "success": False,
+                    "error": "missing_message",
+                    "message": "建立持久通知需要 message 參數",
+                }
+            service_data: dict[str, Any] = {"message": message}
+            if title is not None:
+                service_data["title"] = title
+            if notification_id is not None:
+                service_data["notification_id"] = notification_id
+
+            await hass.services.async_call(
+                "persistent_notification", "create",
+                service_data=service_data, blocking=True,
+            )
+            return {
+                "success": True,
+                "action": "create",
+                "notification_id": notification_id,
+                "message": f"持久通知已建立：{message[:50]}{'...' if len(message) > 50 else ''}",
+            }
+
+        elif action == "dismiss":
+            if not notification_id:
+                return {
+                    "success": False,
+                    "error": "missing_notification_id",
+                    "message": "關閉持久通知需要 notification_id 參數",
+                }
+            await hass.services.async_call(
+                "persistent_notification", "dismiss",
+                service_data={"notification_id": notification_id},
+                blocking=True,
+            )
+            return {
+                "success": True,
+                "action": "dismiss",
+                "notification_id": notification_id,
+                "message": f"持久通知 {notification_id} 已關閉",
+            }
+
+        else:  # dismiss_all
+            await hass.services.async_call(
+                "persistent_notification", "dismiss_all",
+                blocking=True,
+            )
+            return {
+                "success": True,
+                "action": "dismiss_all",
+                "message": "所有持久通知已關閉",
+            }
+
+    except Exception as e:
+        _LOGGER.error("Error managing persistent notification: %s", e)
+        return {
+            "success": False,
+            "error": "notification_failed",
+            "message": f"持久通知操作失敗：{str(e)}",
+        }
+
+
+async def control_counter(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    value: int | None = None,
+) -> dict[str, Any]:
+    """Control a counter entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Counter entity ID
+        action: Action (increment, decrement, reset, set_value)
+        value: Value for set_value action
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到計數器: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "counter":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是計數器: {entity_id}",
+            }
+
+        valid_actions = {"increment", "decrement", "reset", "set_value"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+        if action == "set_value" and value is not None:
+            service_data["value"] = value
+
+        await hass.services.async_call(
+            "counter", action, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"計數器 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling counter: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制計數器失敗：{str(e)}",
+        }
+
+
+async def manage_backup(
+    hass: HomeAssistant,
+    action: str = "create",
+) -> dict[str, Any]:
+    """Manage Home Assistant backups.
+
+    Args:
+        hass: Home Assistant instance
+        action: Action (create, create_automatic)
+    """
+    try:
+        valid_actions = {"create", "create_automatic"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        services = hass.services.async_services()
+        backup_services = services.get("backup", {})
+        if action not in backup_services:
+            return {
+                "success": False,
+                "error": "service_not_available",
+                "message": f"備份服務 backup.{action} 不可用",
+                "available": [f"backup.{s}" for s in backup_services],
+            }
+
+        await hass.services.async_call(
+            "backup", action, blocking=True,
+        )
+
+        return {
+            "success": True,
+            "action": action,
+            "message": f"備份已開始（{action}）",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error managing backup: %s", e)
+        return {
+            "success": False,
+            "error": "backup_failed",
+            "message": f"備份操作失敗：{str(e)}",
+        }
+
+
+async def control_camera(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Control a camera entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Camera entity ID
+        action: Action (snapshot, turn_on, turn_off,
+                enable_motion_detection, disable_motion_detection)
+        filename: File path for snapshot
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到攝影機: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "camera":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是攝影機: {entity_id}",
+            }
+
+        valid_actions = {
+            "snapshot", "turn_on", "turn_off",
+            "enable_motion_detection", "disable_motion_detection",
+        }
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+        if action == "snapshot":
+            if filename:
+                service_data["filename"] = filename
+            else:
+                service_data["filename"] = f"/config/www/snapshot_{entity_id.split('.')[1]}.jpg"
+
+        await hass.services.async_call(
+            "camera", action, service_data=service_data, blocking=True,
+        )
+
+        result: dict[str, Any] = {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "message": f"攝影機 {entity_id} 已執行 {action}",
+        }
+        if action == "snapshot":
+            result["filename"] = service_data["filename"]
+
+        return result
+
+    except Exception as e:
+        _LOGGER.error("Error controlling camera: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制攝影機失敗：{str(e)}",
+        }
+
+
+async def control_switch(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+) -> dict[str, Any]:
+    """Control a switch entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Switch entity ID
+        action: Action (turn_on, turn_off, toggle)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到開關: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "switch":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是開關: {entity_id}",
+            }
+
+        valid_actions = {"turn_on", "turn_off", "toggle"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        await hass.services.async_call(
+            "switch", action,
+            service_data={"entity_id": entity_id},
+            blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"開關 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling switch: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制開關失敗：{str(e)}",
+        }
