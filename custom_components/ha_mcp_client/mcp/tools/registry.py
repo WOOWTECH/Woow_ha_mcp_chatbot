@@ -48,6 +48,9 @@ from .helpers import (
     control_fan,
     delete_automation,
     delete_script,
+    bulk_delete_scenes,
+    bulk_delete_automations,
+    bulk_delete_scripts,
     control_media_player,
     control_lock,
     speak_tts,
@@ -1245,6 +1248,26 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        self.register(
+            ToolDefinition(
+                name="bulk_delete_scenes",
+                description="Bulk delete multiple scenes at once. More efficient than deleting one by one (single YAML write + single reload). Use list_scenes first to find entity_ids.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of scene entity IDs to delete (e.g., ['scene.a', 'scene.b'])",
+                        },
+                    },
+                    "required": ["entity_ids"],
+                },
+                handler=self._handle_bulk_delete_scenes,
+                category="scene",
+            )
+        )
+
         # Blueprint Tools
         self.register(
             ToolDefinition(
@@ -1445,6 +1468,26 @@ NEVER call create_scene without the 'entities' parameter!""",
 
         self.register(
             ToolDefinition(
+                name="bulk_delete_automations",
+                description="Bulk delete multiple automations at once. More efficient than deleting one by one (single YAML write + single reload). Use list_automations first to find entity_ids.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of automation entity IDs to delete (e.g., ['automation.a', 'automation.b'])",
+                        },
+                    },
+                    "required": ["entity_ids"],
+                },
+                handler=self._handle_bulk_delete_automations,
+                category="automation",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
                 name="delete_script",
                 description="Delete a script (removes from scripts.yaml and reloads)",
                 input_schema={
@@ -1458,6 +1501,26 @@ NEVER call create_scene without the 'entities' parameter!""",
                     "required": ["entity_id"],
                 },
                 handler=self._handle_delete_script,
+                category="script",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="bulk_delete_scripts",
+                description="Bulk delete multiple scripts at once. More efficient than deleting one by one (single YAML write + single reload). Use list_scripts first to find entity_ids.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of script entity IDs to delete (e.g., ['script.a', 'script.b'])",
+                        },
+                    },
+                    "required": ["entity_ids"],
+                },
+                handler=self._handle_bulk_delete_scripts,
                 category="script",
             )
         )
@@ -2700,6 +2763,16 @@ NEVER call create_scene without the 'entities' parameter!""",
             entity_id=entity_id,
         )
 
+    async def _handle_bulk_delete_scenes(
+        self,
+        entity_ids: list[str],
+    ) -> dict[str, Any]:
+        """Handle bulk_delete_scenes tool."""
+        return await bulk_delete_scenes(
+            self.hass,
+            entity_ids=entity_ids,
+        )
+
     async def _handle_list_blueprints(
         self,
         domain: str,
@@ -2796,6 +2869,16 @@ NEVER call create_scene without the 'entities' parameter!""",
             entity_id=entity_id,
         )
 
+    async def _handle_bulk_delete_automations(
+        self,
+        entity_ids: list[str],
+    ) -> dict[str, Any]:
+        """Handle bulk_delete_automations tool."""
+        return await bulk_delete_automations(
+            self.hass,
+            entity_ids=entity_ids,
+        )
+
     async def _handle_delete_script(
         self,
         entity_id: str,
@@ -2804,6 +2887,16 @@ NEVER call create_scene without the 'entities' parameter!""",
         return await delete_script(
             self.hass,
             entity_id=entity_id,
+        )
+
+    async def _handle_bulk_delete_scripts(
+        self,
+        entity_ids: list[str],
+    ) -> dict[str, Any]:
+        """Handle bulk_delete_scripts tool."""
+        return await bulk_delete_scripts(
+            self.hass,
+            entity_ids=entity_ids,
         )
 
     # ===== Phase 3 handlers =====

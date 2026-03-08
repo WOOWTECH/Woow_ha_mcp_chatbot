@@ -1827,6 +1827,120 @@ async def delete_scene(
         }
 
 
+async def bulk_delete_scenes(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    """Bulk delete multiple scenes in one operation.
+
+    Reads scenes.yaml once, removes all matching scenes, writes back once,
+    and reloads the scene service once. Much more efficient than calling
+    delete_scene individually for each scene.
+
+    Args:
+        hass: Home Assistant instance
+        entity_ids: List of scene entity IDs (e.g., ['scene.a', 'scene.b'])
+    """
+    import re
+    import yaml
+
+    if not entity_ids:
+        return {"success": False, "error": "empty_list", "message": "未提供要刪除的情境列表"}
+
+    deleted = []
+    failed = []
+
+    # Validate all entities and collect slugs
+    slug_map: dict[str, str] = {}  # slug -> entity_id
+    name_map: dict[str, str] = {}  # entity_id -> friendly_name
+    for eid in entity_ids:
+        state = hass.states.get(eid)
+        if state is None:
+            failed.append({"entity_id": eid, "reason": "not_found"})
+        else:
+            slug = eid.replace("scene.", "", 1)
+            slug_map[slug] = eid
+            name_map[eid] = state.attributes.get("friendly_name", eid)
+
+    if not slug_map:
+        return {
+            "success": False,
+            "deleted": [],
+            "failed": failed,
+            "message": f"所有 {len(failed)} 個情境都找不到",
+        }
+
+    config_path = hass.config.path("scenes.yaml")
+
+    def _bulk_delete():
+        try:
+            with open(config_path, "r") as f:
+                scenes = yaml.safe_load(f) or []
+        except FileNotFoundError:
+            return []
+
+        if not isinstance(scenes, list):
+            return []
+
+        matched = []
+        remaining = []
+        for s in scenes:
+            sid = s.get("id", "")
+            normalized = re.sub(
+                r'[^a-z0-9_]', '',
+                s.get("name", "").lower().replace(" ", "_").replace("-", "_"),
+            )
+            if sid in slug_map:
+                matched.append(slug_map[sid])
+            elif normalized in slug_map:
+                matched.append(slug_map[normalized])
+            else:
+                remaining.append(s)
+
+        if matched:
+            with open(config_path, "w") as f:
+                yaml.dump(remaining, f, default_flow_style=False, allow_unicode=True)
+
+        return matched
+
+    try:
+        matched_ids = await hass.async_add_executor_job(_bulk_delete)
+
+        for eid in slug_map.values():
+            if eid in matched_ids:
+                deleted.append(eid)
+            else:
+                failed.append({"entity_id": eid, "reason": "not_found_in_yaml"})
+
+        if deleted:
+            await hass.services.async_call("scene", "reload", blocking=True)
+
+        total = len(deleted) + len(failed)
+        if deleted and not failed:
+            msg = f"成功刪除 {len(deleted)} 個情境"
+        elif deleted and failed:
+            msg = f"成功刪除 {len(deleted)} 個情境，{len(failed)} 個失敗"
+        else:
+            msg = f"所有 {total} 個情境刪除失敗"
+
+        return {
+            "success": len(deleted) > 0,
+            "deleted": [{"entity_id": eid, "name": name_map.get(eid, eid)} for eid in deleted],
+            "failed": failed,
+            "message": msg,
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error bulk deleting scenes: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "deleted": [],
+            "failed": failed,
+            "message": f"批量刪除情境失敗：{str(e)}",
+        }
+
+
 async def list_blueprints(
     hass: HomeAssistant,
     domain: str,
@@ -2411,6 +2525,119 @@ async def delete_automation(
         }
 
 
+async def bulk_delete_automations(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    """Bulk delete multiple automations in one operation.
+
+    Reads automations.yaml once, removes all matching automations, writes back once,
+    and reloads the automation service once.
+
+    Args:
+        hass: Home Assistant instance
+        entity_ids: List of automation entity IDs (e.g., ['automation.a', 'automation.b'])
+    """
+    import re
+    import yaml
+
+    if not entity_ids:
+        return {"success": False, "error": "empty_list", "message": "未提供要刪除的自動化列表"}
+
+    deleted = []
+    failed = []
+
+    # Validate all entities and collect slugs
+    slug_map: dict[str, str] = {}
+    name_map: dict[str, str] = {}
+    for eid in entity_ids:
+        state = hass.states.get(eid)
+        if state is None:
+            failed.append({"entity_id": eid, "reason": "not_found"})
+        else:
+            slug = eid.replace("automation.", "", 1)
+            slug_map[slug] = eid
+            name_map[eid] = state.attributes.get("friendly_name", eid)
+
+    if not slug_map:
+        return {
+            "success": False,
+            "deleted": [],
+            "failed": failed,
+            "message": f"所有 {len(failed)} 個自動化都找不到",
+        }
+
+    config_path = hass.config.path("automations.yaml")
+
+    def _bulk_delete():
+        try:
+            with open(config_path, "r") as f:
+                automations = yaml.safe_load(f) or []
+        except FileNotFoundError:
+            return []
+
+        if not isinstance(automations, list):
+            return []
+
+        matched = []
+        remaining = []
+        for a in automations:
+            aid = a.get("id", "")
+            normalized = re.sub(
+                r'[^a-z0-9_]', '',
+                a.get("alias", "").lower().replace(" ", "_").replace("-", "_"),
+            )
+            if aid in slug_map:
+                matched.append(slug_map[aid])
+            elif normalized in slug_map:
+                matched.append(slug_map[normalized])
+            else:
+                remaining.append(a)
+
+        if matched:
+            with open(config_path, "w") as f:
+                yaml.dump(remaining, f, default_flow_style=False, allow_unicode=True)
+
+        return matched
+
+    try:
+        matched_ids = await hass.async_add_executor_job(_bulk_delete)
+
+        for eid in slug_map.values():
+            if eid in matched_ids:
+                deleted.append(eid)
+            else:
+                failed.append({"entity_id": eid, "reason": "not_found_in_yaml"})
+
+        if deleted:
+            await hass.services.async_call("automation", "reload", blocking=True)
+
+        total = len(deleted) + len(failed)
+        if deleted and not failed:
+            msg = f"成功刪除 {len(deleted)} 個自動化"
+        elif deleted and failed:
+            msg = f"成功刪除 {len(deleted)} 個自動化，{len(failed)} 個失敗"
+        else:
+            msg = f"所有 {total} 個自動化刪除失敗"
+
+        return {
+            "success": len(deleted) > 0,
+            "deleted": [{"entity_id": eid, "name": name_map.get(eid, eid)} for eid in deleted],
+            "failed": failed,
+            "message": msg,
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error bulk deleting automations: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "deleted": [],
+            "failed": failed,
+            "message": f"批量刪除自動化失敗：{str(e)}",
+        }
+
+
 async def delete_script(
     hass: HomeAssistant,
     entity_id: str,
@@ -2481,6 +2708,110 @@ async def delete_script(
             "success": False,
             "error": "delete_failed",
             "message": f"刪除腳本失敗：{str(e)}",
+        }
+
+
+async def bulk_delete_scripts(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    """Bulk delete multiple scripts in one operation.
+
+    Reads scripts.yaml once, removes all matching scripts, writes back once,
+    and reloads the script service once. Note: scripts.yaml uses dict format
+    (script_id → config), unlike scenes/automations which use list format.
+
+    Args:
+        hass: Home Assistant instance
+        entity_ids: List of script entity IDs (e.g., ['script.a', 'script.b'])
+    """
+    import yaml
+
+    if not entity_ids:
+        return {"success": False, "error": "empty_list", "message": "未提供要刪除的腳本列表"}
+
+    deleted = []
+    failed = []
+
+    # Validate all entities and collect script IDs
+    script_id_map: dict[str, str] = {}  # script_id -> entity_id
+    name_map: dict[str, str] = {}
+    for eid in entity_ids:
+        state = hass.states.get(eid)
+        if state is None:
+            failed.append({"entity_id": eid, "reason": "not_found"})
+        else:
+            script_id = eid.replace("script.", "", 1)
+            script_id_map[script_id] = eid
+            name_map[eid] = state.attributes.get("friendly_name", eid)
+
+    if not script_id_map:
+        return {
+            "success": False,
+            "deleted": [],
+            "failed": failed,
+            "message": f"所有 {len(failed)} 個腳本都找不到",
+        }
+
+    config_path = hass.config.path("scripts.yaml")
+
+    def _bulk_delete():
+        try:
+            with open(config_path, "r") as f:
+                scripts = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            return []
+
+        if not isinstance(scripts, dict):
+            return []
+
+        matched = []
+        for sid, eid in script_id_map.items():
+            if sid in scripts:
+                del scripts[sid]
+                matched.append(eid)
+
+        if matched:
+            with open(config_path, "w") as f:
+                yaml.dump(scripts, f, default_flow_style=False, allow_unicode=True)
+
+        return matched
+
+    try:
+        matched_ids = await hass.async_add_executor_job(_bulk_delete)
+
+        for eid in script_id_map.values():
+            if eid in matched_ids:
+                deleted.append(eid)
+            else:
+                failed.append({"entity_id": eid, "reason": "not_found_in_yaml"})
+
+        if deleted:
+            await hass.services.async_call("script", "reload", blocking=True)
+
+        total = len(deleted) + len(failed)
+        if deleted and not failed:
+            msg = f"成功刪除 {len(deleted)} 個腳本"
+        elif deleted and failed:
+            msg = f"成功刪除 {len(deleted)} 個腳本，{len(failed)} 個失敗"
+        else:
+            msg = f"所有 {total} 個腳本刪除失敗"
+
+        return {
+            "success": len(deleted) > 0,
+            "deleted": [{"entity_id": eid, "name": name_map.get(eid, eid)} for eid in deleted],
+            "failed": failed,
+            "message": msg,
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error bulk deleting scripts: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "deleted": [],
+            "failed": failed,
+            "message": f"批量刪除腳本失敗：{str(e)}",
         }
 
 
