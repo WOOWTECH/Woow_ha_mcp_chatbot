@@ -26,8 +26,10 @@ from .const import (
     CONF_SYSTEM_PROMPT,
     CONF_MAX_TOOL_CALLS,
     CONF_ENABLE_CONVERSATION_HISTORY,
+    CONF_MEMORY_WINDOW,
     DEFAULT_SYSTEM_PROMPT,
     DEFAULT_MAX_TOOL_CALLS,
+    DEFAULT_MEMORY_WINDOW,
     SYSTEM_PROMPT_ADDON,
     AI_SERVICE_ANTHROPIC,
     AI_SERVICE_OPENAI,
@@ -48,6 +50,7 @@ from .ai_services import (
     ToolCall,
 )
 from .mcp.tools import ToolRegistry
+from .nanobot import MemoryStore, SkillsLoader
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +68,8 @@ async def async_setup_entry(
             hass=hass,
             config_entry=config_entry,
             tool_registry=data["tool_registry"],
+            memory_store=data.get("memory_store"),
+            skills_loader=data.get("skills_loader"),
         )
         async_add_entities([entity])
 
@@ -80,11 +85,15 @@ class HAMCPConversationEntity(ConversationEntity):
         hass: HomeAssistant,
         config_entry: ConfigEntry,
         tool_registry: ToolRegistry,
+        memory_store: MemoryStore | None = None,
+        skills_loader: SkillsLoader | None = None,
     ) -> None:
         """Initialize the conversation entity."""
         self.hass = hass
         self._config_entry = config_entry
         self._tool_registry = tool_registry
+        self._memory_store = memory_store
+        self._skills_loader = skills_loader
         self._ai_service: AIServiceProvider | None = None
 
         # Use OrderedDict with max size to prevent memory leak
@@ -97,16 +106,26 @@ class HAMCPConversationEntity(ConversationEntity):
         # Initialize AI service
         self._setup_ai_service()
 
+    def _get_runtime_settings(self) -> dict[str, Any]:
+        """Get runtime settings overrides from hass.data."""
+        entry_data = self.hass.data.get(DOMAIN, {}).get(
+            self._config_entry.entry_id, {}
+        )
+        return entry_data.get("runtime_settings", {})
+
     def _setup_ai_service(self) -> None:
         """Setup the AI service based on config."""
         config = self._config_entry.data
         ai_service_type = config.get(CONF_AI_SERVICE)
+        overrides = self._get_runtime_settings()
 
         service_config = {
             "api_key": config.get(CONF_API_KEY),
-            "model": config.get(CONF_MODEL),
+            "model": overrides.get("model", config.get(CONF_MODEL)),
             "base_url": config.get(CONF_BASE_URL),
             "ollama_host": config.get(CONF_OLLAMA_HOST),
+            "temperature": overrides.get("temperature", config.get("temperature")),
+            "max_tokens": overrides.get("max_tokens", config.get("max_tokens")),
         }
 
         if ai_service_type == AI_SERVICE_ANTHROPIC:
@@ -215,22 +234,45 @@ class HAMCPConversationEntity(ConversationEntity):
         # Add user message
         messages.append(Message(role=MessageRole.USER, content=user_input.text))
 
-        # Get system prompt and auto-append resource creation guidelines
-        base_system_prompt = self._config_entry.data.get(
-            CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
+        # Get system prompt (runtime override takes priority)
+        overrides = self._get_runtime_settings()
+        base_system_prompt = overrides.get(
+            "system_prompt",
+            self._config_entry.data.get(CONF_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
         )
         # Always append the resource creation addon to ensure proper behavior
         system_prompt = base_system_prompt + SYSTEM_PROMPT_ADDON
-        _LOGGER.debug(
-            "System prompt length: base=%d, addon=%d, total=%d",
-            len(base_system_prompt),
-            len(SYSTEM_PROMPT_ADDON),
-            len(system_prompt),
-        )
 
-        # Get max tool calls
-        max_tool_calls = self._config_entry.data.get(
-            CONF_MAX_TOOL_CALLS, DEFAULT_MAX_TOOL_CALLS
+        # Inject memory context (SOUL.md + USER.md + MEMORY.md) into system prompt
+        if self._memory_store:
+            try:
+                memory_context = await self._memory_store.get_memory_context()
+                if memory_context:
+                    system_prompt = memory_context + "\n\n---\n\n" + system_prompt
+                    _LOGGER.debug(
+                        "Memory context injected: %d chars", len(memory_context)
+                    )
+            except Exception as e:
+                _LOGGER.warning("Failed to load memory context: %s", e)
+
+        # Inject skills context (always-on bodies + XML summary of others)
+        if self._skills_loader:
+            try:
+                skills_context = await self._skills_loader.get_skills_context()
+                if skills_context:
+                    system_prompt = system_prompt + "\n\n---\n\n" + skills_context
+                    _LOGGER.debug(
+                        "Skills context injected: %d chars", len(skills_context)
+                    )
+            except Exception as e:
+                _LOGGER.warning("Failed to load skills context: %s", e)
+
+        _LOGGER.debug("System prompt total length: %d", len(system_prompt))
+
+        # Get max tool calls (runtime override takes priority)
+        max_tool_calls = overrides.get(
+            "max_tool_calls",
+            self._config_entry.data.get(CONF_MAX_TOOL_CALLS, DEFAULT_MAX_TOOL_CALLS),
         )
 
         # Convert tools to AI format
@@ -252,6 +294,44 @@ class HAMCPConversationEntity(ConversationEntity):
                 user_message=user_input.text,
                 assistant_message=final_response,
             )
+
+            # Check and trigger memory consolidation (non-blocking)
+            if self._memory_store and self._ai_service:
+                memory_window = self._config_entry.data.get(
+                    CONF_MEMORY_WINDOW, DEFAULT_MEMORY_WINDOW
+                )
+                should = await self._memory_store.should_consolidate(
+                    conversation_id=conversation_id,
+                    message_count=len(messages),
+                    memory_window=memory_window,
+                )
+                if should:
+                    _LOGGER.info(
+                        "Triggering memory consolidation for %s (%d messages)",
+                        conversation_id,
+                        len(messages),
+                    )
+                    # Build message dicts from the Message objects for consolidation
+                    msg_dicts = [
+                        {
+                            "role": m.role.value,
+                            "content": m.content or "",
+                            "tool_calls": (
+                                [{"name": tc.name, "arguments": tc.arguments}
+                                 for tc in m.tool_calls]
+                                if m.tool_calls else None
+                            ),
+                        }
+                        for m in messages
+                    ]
+                    self.hass.async_create_task(
+                        self._memory_store.consolidate(
+                            conversation_id=conversation_id,
+                            messages=msg_dicts,
+                            ai_service=self._ai_service,
+                            memory_window=memory_window,
+                        )
+                    )
 
             response = IntentResponse(language=user_input.language)
             response.async_set_speech(final_response)

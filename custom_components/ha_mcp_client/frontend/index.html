@@ -6,71 +6,251 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>AI 聊天</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <title>AI 助手</title>
+  <link rel="stylesheet" href="styles.css?v=6">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
 </head>
 <body>
   <div id="app" class="app">
-    <!-- Sidebar -->
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar-header">
-        <button id="new-chat-btn" class="btn-primary" title="新對話">
-          <span class="mdi mdi-plus"></span> 新對話
-        </button>
-        <button id="sidebar-close-btn" class="btn-icon mobile-only" title="關閉">
-          <span class="mdi mdi-close"></span>
-        </button>
-      </div>
-      <div class="sidebar-search">
-        <input type="text" id="search-input" placeholder="搜尋對話..." />
-      </div>
-      <div id="conversation-list" class="conversation-list">
-        <!-- Conversation items inserted by JS -->
-      </div>
-    </aside>
 
-    <!-- Chat Area -->
-    <main class="chat-area">
-      <header class="chat-header">
-        <button id="sidebar-toggle-btn" class="btn-icon" title="切換側邊欄">
-          <span class="mdi mdi-menu"></span>
-        </button>
-        <h2 id="chat-title" class="chat-title">選擇或建立對話</h2>
-        <div class="chat-header-actions">
-          <button id="rename-btn" class="btn-icon" title="重新命名" style="display:none">
-            <span class="mdi mdi-pencil-outline"></span>
-          </button>
-          <button id="delete-btn" class="btn-icon" title="刪除對話" style="display:none">
-            <span class="mdi mdi-delete-outline"></span>
-          </button>
-        </div>
-      </header>
+    <!-- ═══ Top Tab Bar ═══ -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="chat">
+        <span class="mdi mdi-chat-outline"></span><span class="tab-label">對話</span>
+      </button>
+      <button class="tab-btn" data-tab="memory">
+        <span class="mdi mdi-brain"></span><span class="tab-label">記憶</span>
+      </button>
+      <button class="tab-btn" data-tab="skills">
+        <span class="mdi mdi-puzzle-outline"></span><span class="tab-label">技能</span>
+      </button>
+      <button class="tab-btn" data-tab="cron">
+        <span class="mdi mdi-clock-outline"></span><span class="tab-label">排程</span>
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <span class="mdi mdi-cog-outline"></span><span class="tab-label">設定</span>
+      </button>
+    </nav>
 
-      <div id="message-list" class="message-list">
-        <div id="welcome-screen" class="welcome-screen">
-          <span class="mdi mdi-robot-happy-outline welcome-icon"></span>
-          <h3>歡迎使用 AI 聊天</h3>
-          <p>點選「+ 新對話」開始，或從左側選擇現有對話</p>
+    <!-- ═══ Tab: Chat ═══ -->
+    <div class="tab-panel active" id="panel-chat">
+      <div class="chat-layout">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+          <div class="sidebar-header">
+            <button id="new-chat-btn" class="btn-primary" title="新對話">
+              <span class="mdi mdi-plus"></span> 新對話
+            </button>
+            <button id="sidebar-close-btn" class="btn-icon mobile-only" title="關閉">
+              <span class="mdi mdi-close"></span>
+            </button>
+          </div>
+          <div class="sidebar-search">
+            <input type="text" id="search-input" placeholder="搜尋對話..." />
+          </div>
+          <div id="conversation-list" class="conversation-list"></div>
+        </aside>
+
+        <!-- Chat Area -->
+        <main class="chat-area">
+          <header class="chat-header">
+            <button id="sidebar-toggle-btn" class="btn-icon" title="切換側邊欄">
+              <span class="mdi mdi-menu"></span>
+            </button>
+            <h2 id="chat-title" class="chat-title">選擇或建立對話</h2>
+            <div class="chat-header-actions">
+              <button id="rename-btn" class="btn-icon" title="重新命名" style="display:none">
+                <span class="mdi mdi-pencil-outline"></span>
+              </button>
+              <button id="delete-btn" class="btn-icon" title="刪除對話" style="display:none">
+                <span class="mdi mdi-delete-outline"></span>
+              </button>
+            </div>
+          </header>
+
+          <div id="message-list" class="message-list">
+            <div id="welcome-screen" class="welcome-screen">
+              <span class="mdi mdi-robot-happy-outline welcome-icon"></span>
+              <h3>AI 助手</h3>
+              <p>點選「+ 新對話」開始，或從左側選擇現有對話</p>
+            </div>
+          </div>
+
+          <div id="input-area" class="input-area" style="display:none">
+            <div class="input-wrapper">
+              <textarea id="message-input" placeholder="輸入訊息... (Enter 送出, Shift+Enter 換行)" rows="1"></textarea>
+              <button id="send-btn" class="btn-send" title="送出" disabled>
+                <span class="mdi mdi-send"></span>
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- ═══ Tab: Memory ═══ -->
+    <div class="tab-panel" id="panel-memory">
+      <div class="manage-layout">
+        <div class="manage-header">
+          <h2><span class="mdi mdi-brain"></span> 記憶管理</h2>
+        </div>
+        <div class="manage-content">
+          <!-- Memory sub-tabs -->
+          <div class="sub-tabs">
+            <button class="sub-tab active" data-mem="soul">SOUL.md</button>
+            <button class="sub-tab" data-mem="user">USER.md</button>
+            <button class="sub-tab" data-mem="memory">MEMORY.md</button>
+            <button class="sub-tab" data-mem="history">HISTORY.md</button>
+          </div>
+          <div class="editor-area">
+            <textarea id="memory-editor" class="mono-editor" placeholder="載入中..."></textarea>
+          </div>
+          <div class="editor-actions">
+            <span id="memory-status" class="status-text"></span>
+            <button id="memory-save-btn" class="btn-primary"><span class="mdi mdi-content-save"></span> 儲存</button>
+          </div>
         </div>
       </div>
+    </div>
 
-      <div id="input-area" class="input-area" style="display:none">
-        <div class="input-wrapper">
-          <textarea
-            id="message-input"
-            placeholder="輸入訊息... (Enter 送出, Shift+Enter 換行)"
-            rows="1"
-          ></textarea>
-          <button id="send-btn" class="btn-send" title="送出" disabled>
-            <span class="mdi mdi-send"></span>
-          </button>
+    <!-- ═══ Tab: Skills ═══ -->
+    <div class="tab-panel" id="panel-skills">
+      <div class="manage-layout">
+        <div class="manage-header">
+          <h2><span class="mdi mdi-puzzle-outline"></span> 技能管理</h2>
+          <button id="skill-add-btn" class="btn-primary"><span class="mdi mdi-plus"></span> 新增技能</button>
+        </div>
+        <div class="manage-content">
+          <div id="skills-list" class="card-list"></div>
+          <!-- Skill editor (hidden by default) -->
+          <div id="skill-editor-panel" class="editor-panel" style="display:none">
+            <div class="editor-header">
+              <input type="text" id="skill-name-input" placeholder="技能名稱 (英文)" />
+              <input type="text" id="skill-desc-input" placeholder="技能描述" />
+            </div>
+            <textarea id="skill-editor" class="mono-editor" placeholder="技能內容 (Markdown)"></textarea>
+            <div class="editor-actions">
+              <label class="toggle-label">
+                <input type="checkbox" id="skill-always-check" /> 常駐注入
+              </label>
+              <div class="btn-group">
+                <button id="skill-cancel-btn" class="btn-secondary">取消</button>
+                <button id="skill-save-btn" class="btn-primary"><span class="mdi mdi-content-save"></span> 儲存</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </main>
+    </div>
+
+    <!-- ═══ Tab: Cron ═══ -->
+    <div class="tab-panel" id="panel-cron">
+      <div class="manage-layout">
+        <div class="manage-header">
+          <h2><span class="mdi mdi-clock-outline"></span> 排程管理</h2>
+          <button id="cron-add-btn" class="btn-primary"><span class="mdi mdi-plus"></span> 新增排程</button>
+        </div>
+        <div class="manage-content">
+          <div id="cron-list" class="card-list"></div>
+          <!-- Cron editor -->
+          <div id="cron-editor-panel" class="editor-panel" style="display:none">
+            <div class="form-grid">
+              <label>名稱</label>
+              <input type="text" id="cron-name-input" placeholder="排程名稱" />
+
+              <label>類型</label>
+              <select id="cron-kind-select">
+                <option value="every">間隔 (every)</option>
+                <option value="cron">Cron 表達式</option>
+                <option value="at">一次性 (at)</option>
+              </select>
+
+              <label id="cron-interval-label">間隔 (分鐘)</label>
+              <input type="number" id="cron-interval-input" min="1" value="60" />
+
+              <label id="cron-expr-label" style="display:none">Cron 表達式</label>
+              <input type="text" id="cron-expr-input" placeholder="0 8 * * *" style="display:none" />
+
+              <label id="cron-at-label" style="display:none">執行時間</label>
+              <input type="datetime-local" id="cron-at-input" style="display:none" />
+
+              <label>時區</label>
+              <input type="text" id="cron-tz-input" placeholder="Asia/Taipei" value="Asia/Taipei" />
+
+              <label>訊息</label>
+              <input type="text" id="cron-message-input" placeholder="觸發時的對話訊息" />
+
+              <label>類別</label>
+              <select id="cron-payload-kind">
+                <option value="agent_turn">AI 對話</option>
+                <option value="system_event">系統事件</option>
+              </select>
+            </div>
+            <div class="editor-actions">
+              <label class="toggle-label">
+                <input type="checkbox" id="cron-delete-after" /> 執行後刪除
+              </label>
+              <div class="btn-group">
+                <button id="cron-cancel-btn" class="btn-secondary">取消</button>
+                <button id="cron-save-btn" class="btn-primary"><span class="mdi mdi-content-save"></span> 儲存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Tab: Settings ═══ -->
+    <div class="tab-panel" id="panel-settings">
+      <div class="manage-layout">
+        <div class="manage-header">
+          <h2><span class="mdi mdi-cog-outline"></span> AI 設定</h2>
+        </div>
+        <div class="manage-content">
+          <div class="settings-form">
+            <div class="setting-group">
+              <h3>模型參數</h3>
+              <div class="form-grid">
+                <label>AI 服務</label>
+                <input type="text" id="set-ai-service" disabled />
+
+                <label>模型</label>
+                <input type="text" id="set-model" placeholder="模型名稱" />
+
+                <label>Temperature</label>
+                <div class="range-row">
+                  <input type="range" id="set-temperature" min="0" max="2" step="0.1" value="0.7" />
+                  <span id="set-temp-value">0.7</span>
+                </div>
+
+                <label>Max Tokens</label>
+                <input type="number" id="set-max-tokens" min="100" max="128000" step="100" value="4096" />
+
+                <label>Max Tool Calls</label>
+                <input type="number" id="set-max-tool-calls" min="1" max="50" value="10" />
+
+                <label>Memory Window</label>
+                <input type="number" id="set-memory-window" min="10" max="500" value="50" />
+              </div>
+            </div>
+
+            <div class="setting-group">
+              <h3>系統提示詞</h3>
+              <textarea id="set-system-prompt" class="mono-editor" rows="8" placeholder="系統提示詞..."></textarea>
+            </div>
+
+            <div class="editor-actions">
+              <span id="settings-status" class="status-text"></span>
+              <button id="settings-save-btn" class="btn-primary"><span class="mdi mdi-content-save"></span> 套用設定</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <!-- Rename Dialog -->
+  <!-- ═══ Dialogs ═══ -->
   <div id="rename-dialog" class="dialog-overlay" style="display:none">
     <div class="dialog">
       <h3>重新命名對話</h3>
@@ -82,7 +262,6 @@
     </div>
   </div>
 
-  <!-- Delete Confirm Dialog -->
   <div id="delete-dialog" class="dialog-overlay" style="display:none">
     <div class="dialog">
       <h3>刪除對話</h3>
@@ -94,6 +273,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

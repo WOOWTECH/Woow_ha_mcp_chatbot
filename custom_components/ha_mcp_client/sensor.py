@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -13,6 +14,29 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Shared stats cache to avoid redundant file reads across sensors
+_stats_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_CACHE_TTL = 60  # seconds
+
+
+async def _get_cached_stats(memory_store: Any, entry_id: str) -> dict[str, Any]:
+    """Get stats with caching to avoid redundant file reads."""
+    now = time.monotonic()
+    cached = _stats_cache.get(entry_id)
+    if cached and (now - cached[0]) < _CACHE_TTL:
+        return cached[1]
+
+    try:
+        stats = await memory_store.get_stats()
+    except Exception as e:
+        _LOGGER.warning("Failed to get memory stats: %s", e)
+        if cached:
+            return cached[1]
+        return {}
+
+    _stats_cache[entry_id] = (now, stats)
+    return stats
 
 
 async def async_setup_entry(
@@ -48,13 +72,25 @@ async def async_setup_entry(
             entities.append(NanobotCronJobLastStatusSensor(entry, cron_service, job))
 
     if entities:
-        async_add_entities(entities, update_before_add=True)
+        async_add_entities(entities, update_before_add=False)
 
 
-class NanobotMemoryEntriesSensor(SensorEntity):
-    """Sensor showing the number of long-term memory entries."""
+class _NanobotBaseSensor(SensorEntity):
+    """Base class for nanobot sensors with shared update interval."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = True
+
+    @property
+    def scan_interval(self):
+        """Use a longer scan interval to reduce file I/O."""
+        from datetime import timedelta
+        return timedelta(seconds=120)
+
+
+class NanobotMemoryEntriesSensor(_NanobotBaseSensor):
+    """Sensor showing the number of long-term memory entries."""
+
     _attr_icon = "mdi:brain"
     _attr_name = "Nanobot 記憶條目數"
 
@@ -69,14 +105,13 @@ class NanobotMemoryEntriesSensor(SensorEntity):
         return self._count
 
     async def async_update(self) -> None:
-        stats = await self._memory_store.get_stats()
+        stats = await _get_cached_stats(self._memory_store, self._entry.entry_id)
         self._count = stats.get("memory_entries", 0)
 
 
-class NanobotHistoryEntriesSensor(SensorEntity):
+class NanobotHistoryEntriesSensor(_NanobotBaseSensor):
     """Sensor showing the number of history entries."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:history"
     _attr_name = "Nanobot 歷史條目數"
 
@@ -91,14 +126,13 @@ class NanobotHistoryEntriesSensor(SensorEntity):
         return self._count
 
     async def async_update(self) -> None:
-        stats = await self._memory_store.get_stats()
+        stats = await _get_cached_stats(self._memory_store, self._entry.entry_id)
         self._count = stats.get("history_entries", 0)
 
 
-class NanobotLastConsolidationSensor(SensorEntity):
+class NanobotLastConsolidationSensor(_NanobotBaseSensor):
     """Sensor showing when memory was last consolidated."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:clock-check-outline"
     _attr_name = "Nanobot 上次記憶整合"
 
@@ -113,14 +147,13 @@ class NanobotLastConsolidationSensor(SensorEntity):
         return self._value or "尚未整合"
 
     async def async_update(self) -> None:
-        stats = await self._memory_store.get_stats()
+        stats = await _get_cached_stats(self._memory_store, self._entry.entry_id)
         self._value = stats.get("last_consolidation")
 
 
-class NanobotSkillsCountSensor(SensorEntity):
+class NanobotSkillsCountSensor(_NanobotBaseSensor):
     """Sensor showing the number of installed skills."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:puzzle-outline"
     _attr_name = "Nanobot 技能數量"
 
@@ -131,19 +164,24 @@ class NanobotSkillsCountSensor(SensorEntity):
 
     @property
     def native_value(self) -> int:
-        return len(self._skills_loader._cache)
+        try:
+            return len(self._skills_loader._cache)
+        except Exception:
+            return 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        cache = self._skills_loader._cache
-        always_on = sum(1 for m in cache.values() if m.get("always"))
-        return {"always_on": always_on, "on_demand": len(cache) - always_on}
+        try:
+            cache = self._skills_loader._cache
+            always_on = sum(1 for m in cache.values() if m.get("always"))
+            return {"always_on": always_on, "on_demand": len(cache) - always_on}
+        except Exception:
+            return {}
 
 
-class NanobotCronJobsCountSensor(SensorEntity):
+class NanobotCronJobsCountSensor(_NanobotBaseSensor):
     """Sensor showing the number of cron jobs."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:clock-outline"
     _attr_name = "Nanobot 排程數量"
 
@@ -154,19 +192,24 @@ class NanobotCronJobsCountSensor(SensorEntity):
 
     @property
     def native_value(self) -> int:
-        return len(self._cron_service._jobs)
+        try:
+            return len(self._cron_service._jobs)
+        except Exception:
+            return 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        jobs = self._cron_service._jobs
-        enabled = sum(1 for j in jobs.values() if j.enabled)
-        return {"enabled": enabled, "disabled": len(jobs) - enabled}
+        try:
+            jobs = self._cron_service._jobs
+            enabled = sum(1 for j in jobs.values() if j.enabled)
+            return {"enabled": enabled, "disabled": len(jobs) - enabled}
+        except Exception:
+            return {}
 
 
-class NanobotCronJobNextRunSensor(SensorEntity):
+class NanobotCronJobNextRunSensor(_NanobotBaseSensor):
     """Sensor showing the next run time for a specific cron job."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:clock-fast"
 
     def __init__(self, entry: ConfigEntry, cron_service: Any, job: Any) -> None:
@@ -202,10 +245,9 @@ class NanobotCronJobNextRunSensor(SensorEntity):
         }
 
 
-class NanobotCronJobLastStatusSensor(SensorEntity):
+class NanobotCronJobLastStatusSensor(_NanobotBaseSensor):
     """Sensor showing the last execution status for a specific cron job."""
 
-    _attr_has_entity_name = True
     _attr_icon = "mdi:check-circle-outline"
 
     def __init__(self, entry: ConfigEntry, cron_service: Any, job: Any) -> None:

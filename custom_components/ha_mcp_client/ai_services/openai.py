@@ -102,7 +102,6 @@ class OpenAIService(AIServiceProvider):
             if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
                 params["reasoning_effort"] = reasoning_effort
 
-
         if tools:
             params["tools"] = [self._convert_tool_to_openai(t) for t in tools]
             params["tool_choice"] = "auto"
@@ -168,11 +167,15 @@ class OpenAIService(AIServiceProvider):
         try:
             client = await self._get_client()
             # Make a minimal API call to validate
-            await client.chat.completions.create(
-                model=self._model,
-                max_tokens=10,
-                messages=[{"role": "user", "content": "test"}],
-            )
+            validate_params: dict[str, Any] = {
+                "model": self._model,
+                "messages": [{"role": "user", "content": "test"}],
+            }
+            if self._is_reasoning_model():
+                validate_params["max_completion_tokens"] = 10
+            else:
+                validate_params["max_tokens"] = 10
+            await client.chat.completions.create(**validate_params)
             return True
         except Exception as e:
             _LOGGER.error("OpenAI validation failed: %s", e)
@@ -183,6 +186,16 @@ class OpenAIService(AIServiceProvider):
         if self._client is not None:
             await self._client.close()
             self._client = None
+
+    def _is_reasoning_model(self) -> bool:
+        """Check if the model is a reasoning model with restricted parameters."""
+        model = self._model.lower()
+        # Models that require max_completion_tokens:
+        # o1, o3, gpt-5 series, and any future models
+        for prefix in ("o1", "o3", "o4", "gpt-5", "gpt-6"):
+            if model.startswith(prefix):
+                return True
+        return False
 
     def _convert_messages(
         self, messages: list[Message], system_prompt: str | None = None

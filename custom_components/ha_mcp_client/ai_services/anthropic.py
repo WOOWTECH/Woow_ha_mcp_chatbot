@@ -62,9 +62,13 @@ class AnthropicService(AIServiceProvider):
         # Build request parameters
         params: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": self.config.get("max_tokens") or 4096,
             "messages": anthropic_messages,
         }
+
+        temperature = self.config.get("temperature")
+        if temperature is not None:
+            params["temperature"] = temperature
 
         if system_prompt:
             params["system"] = system_prompt

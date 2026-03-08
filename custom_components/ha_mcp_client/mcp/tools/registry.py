@@ -2790,8 +2790,8 @@ NEVER call create_scene without the 'entities' parameter!""",
     ) -> dict[str, Any]:
         """Handle control_light tool."""
         service_map = {
-            "on": "turn_on",
-            "off": "turn_off",
+            "turn_on": "turn_on",
+            "turn_off": "turn_off",
             "toggle": "toggle",
         }
         service = service_map.get(action)

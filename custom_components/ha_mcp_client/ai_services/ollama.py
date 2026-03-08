@@ -61,6 +61,17 @@ class OllamaService(AIServiceProvider):
             "stream": False,
         }
 
+        # Ollama uses "options" for model parameters
+        options: dict[str, Any] = {}
+        temperature = self.config.get("temperature")
+        if temperature is not None:
+            options["temperature"] = temperature
+        max_tokens = self.config.get("max_tokens")
+        if max_tokens:
+            options["num_predict"] = max_tokens
+        if options:
+            payload["options"] = options
+
         if tools:
             payload["tools"] = [self._convert_tool_to_ollama(t) for t in tools]
 
