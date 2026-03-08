@@ -1535,6 +1535,26 @@ async def update_calendar_event(
                 "message": f"無法存取日曆實體: {calendar_entity_id}",
             }
 
+        # HA local calendar requires dtstart/dtend in update event dict.
+        # If not provided, fetch current event to preserve existing values.
+        if "dtstart" not in event or "dtend" not in event:
+            try:
+                import datetime as _dt
+                now = _dt.datetime.now(_dt.timezone.utc)
+                far_future = now + _dt.timedelta(days=365 * 5)
+                existing_events = await entity.async_get_events(
+                    hass, now - _dt.timedelta(days=365 * 5), far_future
+                )
+                for existing in existing_events:
+                    if existing.uid == uid:
+                        if "dtstart" not in event:
+                            event["dtstart"] = existing.start
+                        if "dtend" not in event:
+                            event["dtend"] = existing.end
+                        break
+            except Exception:
+                pass  # If we can't fetch, try updating anyway
+
         await entity.async_update_event(
             uid,
             event,
