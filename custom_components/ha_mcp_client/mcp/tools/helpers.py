@@ -2255,6 +2255,7 @@ async def control_fan(
         valid_actions = {
             "turn_on", "turn_off", "toggle",
             "set_percentage", "set_preset_mode", "set_direction", "oscillate",
+            "increase_speed", "decrease_speed",
         }
         if action not in valid_actions:
             return {
@@ -2278,6 +2279,10 @@ async def control_fan(
             service_data["direction"] = direction
         elif action == "oscillate" and oscillating is not None:
             service_data["oscillating"] = oscillating
+        # increase_speed / decrease_speed use percentage_step if provided
+        elif action in ("increase_speed", "decrease_speed"):
+            if percentage is not None:
+                service_data["percentage_step"] = percentage
 
         await hass.services.async_call(
             "fan", action, service_data=service_data, blocking=True,
@@ -2473,6 +2478,8 @@ async def control_media_player(
     source: str | None = None,
     shuffle: bool | None = None,
     repeat: str | None = None,
+    seek_position: float | None = None,
+    sound_mode: str | None = None,
 ) -> dict[str, Any]:
     """Control a media player entity.
 
@@ -2514,6 +2521,7 @@ async def control_media_player(
             "volume_up", "volume_down", "volume_set", "volume_mute",
             "turn_on", "turn_off", "toggle",
             "select_source", "play_media", "shuffle_set", "repeat_set",
+            "media_seek", "select_sound_mode",
         }
         if action not in valid_actions:
             return {
@@ -2539,6 +2547,10 @@ async def control_media_player(
             service_data["shuffle"] = shuffle
         elif action == "repeat_set" and repeat is not None:
             service_data["repeat"] = repeat
+        elif action == "media_seek" and seek_position is not None:
+            service_data["seek_position"] = seek_position
+        elif action == "select_sound_mode" and sound_mode is not None:
+            service_data["sound_mode"] = sound_mode
         elif action == "turn_on":
             if volume_level is not None:
                 service_data["volume_level"] = volume_level
@@ -2928,6 +2940,10 @@ async def control_camera(
     entity_id: str,
     action: str,
     filename: str | None = None,
+    media_player: str | None = None,
+    format: str | None = None,
+    duration: int | None = None,
+    lookback: int | None = None,
 ) -> dict[str, Any]:
     """Control a camera entity.
 
@@ -2935,8 +2951,13 @@ async def control_camera(
         hass: Home Assistant instance
         entity_id: Camera entity ID
         action: Action (snapshot, turn_on, turn_off,
-                enable_motion_detection, disable_motion_detection)
-        filename: File path for snapshot
+                enable_motion_detection, disable_motion_detection,
+                play_stream, record)
+        filename: File path for snapshot/record
+        media_player: Media player entity for play_stream
+        format: Stream format for play_stream (default: hls)
+        duration: Recording duration in seconds
+        lookback: Lookback seconds before recording start
     """
     try:
         state = hass.states.get(entity_id)
@@ -2958,6 +2979,7 @@ async def control_camera(
         valid_actions = {
             "snapshot", "turn_on", "turn_off",
             "enable_motion_detection", "disable_motion_detection",
+            "play_stream", "record",
         }
         if action not in valid_actions:
             return {
@@ -2967,11 +2989,26 @@ async def control_camera(
             }
 
         service_data: dict[str, Any] = {"entity_id": entity_id}
+
         if action == "snapshot":
             if filename:
                 service_data["filename"] = filename
             else:
                 service_data["filename"] = f"/config/www/snapshot_{entity_id.split('.')[1]}.jpg"
+        elif action == "play_stream":
+            if media_player:
+                service_data["media_player"] = media_player
+            if format:
+                service_data["format"] = format
+        elif action == "record":
+            if filename:
+                service_data["filename"] = filename
+            else:
+                service_data["filename"] = f"/config/www/record_{entity_id.split('.')[1]}.mp4"
+            if duration is not None:
+                service_data["duration"] = duration
+            if lookback is not None:
+                service_data["lookback"] = lookback
 
         await hass.services.async_call(
             "camera", action, service_data=service_data, blocking=True,
@@ -2983,7 +3020,7 @@ async def control_camera(
             "action": action,
             "message": f"攝影機 {entity_id} 已執行 {action}",
         }
-        if action == "snapshot":
+        if action in ("snapshot", "record"):
             result["filename"] = service_data["filename"]
 
         return result
@@ -3055,4 +3092,459 @@ async def control_switch(
             "success": False,
             "error": "control_failed",
             "message": f"控制開關失敗：{str(e)}",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: CRUD 補完 + 增強 + 新域
+# ---------------------------------------------------------------------------
+
+
+async def update_automation(
+    hass: HomeAssistant,
+    entity_id: str,
+    alias: str | None = None,
+    description: str | None = None,
+    trigger: list[dict[str, Any]] | None = None,
+    condition: list[dict[str, Any]] | None = None,
+    action: list[dict[str, Any]] | None = None,
+    mode: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing automation in automations.yaml.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Automation entity ID
+        alias: New alias/name
+        description: New description
+        trigger: New trigger list
+        condition: New condition list
+        action: New action list
+        mode: Execution mode (single, restart, queued, parallel)
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到自動化: {entity_id}",
+            }
+
+        automation_slug = entity_id.replace("automation.", "", 1)
+        config_path = hass.config.path("automations.yaml")
+
+        # Look up the automation's unique_id from entity registry
+        # which matches the "id" field in automations.yaml
+        from homeassistant.helpers import entity_registry as er
+        ent_reg = er.async_get(hass)
+        entry = ent_reg.async_get(entity_id)
+        automation_unique_id = entry.unique_id if entry else None
+
+        def _update_automation():
+            import re
+
+            try:
+                with open(config_path, "r") as f:
+                    automations = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return None
+
+            if not isinstance(automations, list):
+                return None
+
+            target = None
+            for a in automations:
+                aid = a.get("id", "")
+                a_alias = a.get("alias", "")
+                a_slug = re.sub(
+                    r"[^a-z0-9_]", "",
+                    a_alias.lower().replace(" ", "_").replace("-", "_"),
+                )
+                if (
+                    aid == automation_slug
+                    or a_slug == automation_slug
+                    or (automation_unique_id and aid == automation_unique_id)
+                ):
+                    target = a
+                    break
+
+            if target is None:
+                return None
+
+            # Apply updates
+            if alias is not None:
+                target["alias"] = alias
+            if description is not None:
+                target["description"] = description
+            if trigger is not None:
+                target["trigger"] = trigger
+            if condition is not None:
+                target["condition"] = condition
+            if action is not None:
+                target["action"] = action
+            if mode is not None:
+                target["mode"] = mode
+
+            with open(config_path, "w") as f:
+                yaml.dump(automations, f, default_flow_style=False, allow_unicode=True)
+
+            return target.get("alias", automation_slug)
+
+        result_alias = await hass.async_add_executor_job(_update_automation)
+
+        if result_alias is None:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 automations.yaml 中找不到自動化: {entity_id}",
+            }
+
+        await hass.services.async_call("automation", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "message": f"自動化「{result_alias}」已更新",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating automation: %s", e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新自動化失敗：{str(e)}",
+        }
+
+
+async def update_script(
+    hass: HomeAssistant,
+    entity_id: str,
+    alias: str | None = None,
+    description: str | None = None,
+    sequence: list[dict[str, Any]] | None = None,
+    mode: str | None = None,
+    icon: str | None = None,
+    fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Update an existing script in scripts.yaml.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Script entity ID
+        alias: New alias/name
+        description: New description
+        sequence: New action sequence
+        mode: Execution mode (single, restart, queued, parallel)
+        icon: New icon
+        fields: New input fields definition
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到腳本: {entity_id}",
+            }
+
+        script_id = entity_id.replace("script.", "", 1)
+        config_path = hass.config.path("scripts.yaml")
+
+        def _update_script():
+            try:
+                with open(config_path, "r") as f:
+                    scripts = yaml.safe_load(f) or {}
+            except FileNotFoundError:
+                return None
+
+            if not isinstance(scripts, dict):
+                return None
+
+            if script_id not in scripts:
+                return None
+
+            target = scripts[script_id]
+
+            if alias is not None:
+                target["alias"] = alias
+            if description is not None:
+                target["description"] = description
+            if sequence is not None:
+                target["sequence"] = sequence
+            if mode is not None:
+                target["mode"] = mode
+            if icon is not None:
+                target["icon"] = icon
+            if fields is not None:
+                target["fields"] = fields
+
+            with open(config_path, "w") as f:
+                yaml.dump(scripts, f, default_flow_style=False, allow_unicode=True)
+
+            return target.get("alias", script_id)
+
+        result_alias = await hass.async_add_executor_job(_update_script)
+
+        if result_alias is None:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 scripts.yaml 中找不到腳本: {entity_id}",
+            }
+
+        await hass.services.async_call("script", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "message": f"腳本「{result_alias}」已更新",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating script: %s", e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新腳本失敗：{str(e)}",
+        }
+
+
+async def control_valve(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    position: int | None = None,
+) -> dict[str, Any]:
+    """Control a valve entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Valve entity ID
+        action: Action (open, close, stop, set_position, toggle)
+        position: Valve position 0-100 (for set_position)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到閥門: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "valve":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是閥門: {entity_id}",
+            }
+
+        service_map = {
+            "open": "open_valve",
+            "close": "close_valve",
+            "stop": "stop_valve",
+            "toggle": "toggle",
+        }
+
+        valid_actions = set(service_map.keys()) | {"set_position"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+
+        if action == "set_position":
+            if position is None:
+                return {
+                    "success": False,
+                    "error": "missing_parameter",
+                    "message": "set_position 需要提供 position 參數",
+                }
+            service_data["position"] = position
+            service = "set_valve_position"
+        else:
+            service = service_map[action]
+
+        await hass.services.async_call(
+            "valve", service, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"閥門 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling valve: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制閥門失敗：{str(e)}",
+        }
+
+
+async def control_number(
+    hass: HomeAssistant,
+    entity_id: str,
+    value: float,
+) -> dict[str, Any]:
+    """Set value of a number entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Number entity ID
+        value: Value to set (must be within entity min/max range)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到 number 實體: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "number":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是 number 域: {entity_id}",
+            }
+
+        # Validate against min/max
+        attrs = state.attributes
+        min_val = attrs.get("min")
+        max_val = attrs.get("max")
+        step = attrs.get("step")
+
+        if min_val is not None and value < min_val:
+            return {
+                "success": False,
+                "error": "out_of_range",
+                "message": f"值 {value} 低於最小值 {min_val}",
+            }
+        if max_val is not None and value > max_val:
+            return {
+                "success": False,
+                "error": "out_of_range",
+                "message": f"值 {value} 超過最大值 {max_val}",
+            }
+
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            service_data={"entity_id": entity_id, "value": value},
+            blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "value": value,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"Number {entity_id} 已設定為 {value}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling number: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制 number 失敗：{str(e)}",
+        }
+
+
+async def control_shopping_list(
+    hass: HomeAssistant,
+    action: str,
+    name: str | None = None,
+) -> dict[str, Any]:
+    """Manage the built-in HA shopping list.
+
+    Args:
+        hass: Home Assistant instance
+        action: Action (add_item, remove_item, complete_item, incomplete_item,
+                complete_all, incomplete_all, clear_completed, sort)
+        name: Item name (required for add/remove/complete/incomplete)
+    """
+    try:
+        services = hass.services.async_services()
+        if "shopping_list" not in services:
+            return {
+                "success": False,
+                "error": "not_available",
+                "message": "購物清單整合未啟用",
+            }
+
+        valid_actions = {
+            "add_item", "remove_item", "complete_item", "incomplete_item",
+            "complete_all", "incomplete_all", "clear_completed", "sort",
+        }
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用: {', '.join(sorted(valid_actions))}",
+            }
+
+        # Actions requiring item name
+        item_actions = {"add_item", "remove_item", "complete_item", "incomplete_item"}
+        if action in item_actions and not name:
+            return {
+                "success": False,
+                "error": "missing_parameter",
+                "message": f"{action} 需要提供 name 參數",
+            }
+
+        # Map actions to HA services
+        service_map = {
+            "add_item": "add_item",
+            "remove_item": "remove_item",
+            "complete_item": "complete_item",
+            "incomplete_item": "incomplete_item",
+            "complete_all": "complete_all",
+            "incomplete_all": "incomplete_all",
+            "clear_completed": "clear_completed_items",
+            "sort": "sort",
+        }
+
+        service_data: dict[str, Any] = {}
+        if name:
+            service_data["name"] = name
+
+        await hass.services.async_call(
+            "shopping_list",
+            service_map[action],
+            service_data=service_data,
+            blocking=True,
+        )
+
+        return {
+            "success": True,
+            "action": action,
+            "name": name,
+            "message": f"購物清單已執行 {action}" + (f"：{name}" if name else ""),
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error managing shopping list: %s", e)
+        return {
+            "success": False,
+            "error": "shopping_list_failed",
+            "message": f"購物清單操作失敗：{str(e)}",
         }

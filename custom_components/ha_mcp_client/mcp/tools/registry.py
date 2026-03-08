@@ -56,6 +56,11 @@ from .helpers import (
     manage_backup,
     control_camera,
     control_switch,
+    update_automation,
+    update_script,
+    control_valve,
+    control_number,
+    control_shopping_list,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -732,13 +737,18 @@ NEVER call create_script without the 'sequence' parameter!""",
         self.register(
             ToolDefinition(
                 name="control_climate",
-                description="Control a climate device (thermostat, AC)",
+                description="Control a climate device (thermostat, AC) — mode, temperature, fan, swing, preset, humidity",
                 input_schema={
                     "type": "object",
                     "properties": {
                         "entity_id": {
                             "type": "string",
                             "description": "Climate entity ID",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["turn_on", "turn_off"],
+                            "description": "Turn the climate device on or off",
                         },
                         "hvac_mode": {
                             "type": "string",
@@ -757,6 +767,22 @@ NEVER call create_script without the 'sequence' parameter!""",
                             "type": "number",
                             "description": "Low target temperature (for heat_cool mode)",
                         },
+                        "fan_mode": {
+                            "type": "string",
+                            "description": "Fan mode (e.g., auto, low, medium, high)",
+                        },
+                        "swing_mode": {
+                            "type": "string",
+                            "description": "Swing mode (e.g., off, vertical, horizontal, both)",
+                        },
+                        "preset_mode": {
+                            "type": "string",
+                            "description": "Preset mode (e.g., eco, away, boost, comfort)",
+                        },
+                        "humidity": {
+                            "type": "number",
+                            "description": "Target humidity percentage",
+                        },
                     },
                     "required": ["entity_id"],
                 },
@@ -769,7 +795,7 @@ NEVER call create_script without the 'sequence' parameter!""",
         self.register(
             ToolDefinition(
                 name="control_cover",
-                description="Control a cover (blinds, garage door, etc.)",
+                description="Control a cover (blinds, garage door, etc.) including tilt",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -779,14 +805,23 @@ NEVER call create_script without the 'sequence' parameter!""",
                         },
                         "action": {
                             "type": "string",
-                            "enum": ["open", "close", "stop", "set_position"],
+                            "enum": [
+                                "open", "close", "stop", "toggle", "set_position",
+                                "open_tilt", "close_tilt", "stop_tilt", "toggle_tilt", "set_tilt_position",
+                            ],
                             "description": "Action to perform",
                         },
                         "position": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 100,
-                            "description": "Position (0-100, for set_position action)",
+                            "description": "Position 0-100 (for set_position)",
+                        },
+                        "tilt_position": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": "Tilt position 0-100 (for set_tilt_position)",
                         },
                     },
                     "required": ["entity_id", "action"],
@@ -1360,6 +1395,7 @@ NEVER call create_scene without the 'entities' parameter!""",
                                 "turn_on", "turn_off", "toggle",
                                 "set_percentage", "set_preset_mode",
                                 "set_direction", "oscillate",
+                                "increase_speed", "decrease_speed",
                             ],
                             "description": "Action to perform",
                         },
@@ -1447,6 +1483,7 @@ NEVER call create_scene without the 'entities' parameter!""",
                                 "volume_up", "volume_down", "volume_set", "volume_mute",
                                 "turn_on", "turn_off", "toggle",
                                 "select_source", "play_media", "shuffle_set", "repeat_set",
+                                "media_seek", "select_sound_mode",
                             ],
                             "description": "Action to perform",
                         },
@@ -1478,6 +1515,14 @@ NEVER call create_scene without the 'entities' parameter!""",
                             "type": "string",
                             "enum": ["off", "all", "one"],
                             "description": "Repeat mode (for repeat_set)",
+                        },
+                        "seek_position": {
+                            "type": "number",
+                            "description": "Seek position in seconds (for media_seek)",
+                        },
+                        "sound_mode": {
+                            "type": "string",
+                            "description": "Sound mode name (for select_sound_mode)",
                         },
                     },
                     "required": ["entity_id", "action"],
@@ -1641,12 +1686,30 @@ NEVER call create_scene without the 'entities' parameter!""",
                             "enum": [
                                 "snapshot", "turn_on", "turn_off",
                                 "enable_motion_detection", "disable_motion_detection",
+                                "play_stream", "record",
                             ],
                             "description": "Action to perform",
                         },
                         "filename": {
                             "type": "string",
-                            "description": "File path for snapshot (default: /config/www/snapshot_<name>.jpg)",
+                            "description": "File path for snapshot/record (default: /config/www/snapshot_<name>.jpg)",
+                        },
+                        "media_player": {
+                            "type": "string",
+                            "description": "Media player entity ID for play_stream target",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["hls"],
+                            "description": "Stream format for play_stream (default: hls)",
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "description": "Recording duration in seconds (for record)",
+                        },
+                        "lookback": {
+                            "type": "integer",
+                            "description": "Lookback seconds to include before recording (for record)",
                         },
                     },
                     "required": ["entity_id", "action"],
@@ -1677,6 +1740,182 @@ NEVER call create_scene without the 'entities' parameter!""",
                 },
                 handler=self._handle_control_switch,
                 category="switch",
+            )
+        )
+
+        # Phase 4: CRUD 補完 + 新域覆蓋
+
+        self.register(
+            ToolDefinition(
+                name="update_automation",
+                description="Update an existing automation (modify triggers, conditions, actions, etc.)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Automation entity ID (e.g., 'automation.motion_light')",
+                        },
+                        "alias": {
+                            "type": "string",
+                            "description": "New name/alias for the automation",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description",
+                        },
+                        "trigger": {
+                            "type": "array",
+                            "description": "New trigger list",
+                            "items": {"type": "object"},
+                        },
+                        "condition": {
+                            "type": "array",
+                            "description": "New condition list",
+                            "items": {"type": "object"},
+                        },
+                        "action": {
+                            "type": "array",
+                            "description": "New action list",
+                            "items": {"type": "object"},
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["single", "restart", "queued", "parallel"],
+                            "description": "Execution mode",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_automation,
+                category="automation",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="update_script",
+                description="Update an existing script (modify sequence, mode, fields, etc.)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Script entity ID (e.g., 'script.morning_routine')",
+                        },
+                        "alias": {
+                            "type": "string",
+                            "description": "New name/alias for the script",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "New description",
+                        },
+                        "sequence": {
+                            "type": "array",
+                            "description": "New action sequence",
+                            "items": {"type": "object"},
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["single", "restart", "queued", "parallel"],
+                            "description": "Execution mode",
+                        },
+                        "icon": {
+                            "type": "string",
+                            "description": "New icon (e.g., 'mdi:script')",
+                        },
+                        "fields": {
+                            "type": "object",
+                            "description": "Input fields definition",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_script,
+                category="script",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_valve",
+                description="Control a valve entity (water valve, gas valve, irrigation)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Valve entity ID (e.g., 'valve.water_main')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["open", "close", "stop", "set_position", "toggle"],
+                            "description": "Action to perform",
+                        },
+                        "position": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100,
+                            "description": "Valve position 0-100 (for set_position)",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_valve,
+                category="valve",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_number",
+                description="Set the value of a number entity (device-specific numeric parameters)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Number entity ID (e.g., 'number.speaker_volume')",
+                        },
+                        "value": {
+                            "type": "number",
+                            "description": "Value to set (must be within entity min/max range)",
+                        },
+                    },
+                    "required": ["entity_id", "value"],
+                },
+                handler=self._handle_control_number,
+                category="number",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_shopping_list",
+                description="Manage the HA shopping list (add, remove, complete, sort items)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "add_item", "remove_item",
+                                "complete_item", "incomplete_item",
+                                "complete_all", "incomplete_all",
+                                "clear_completed", "sort",
+                            ],
+                            "description": "Action to perform",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "Item name (required for add/remove/complete/incomplete)",
+                        },
+                    },
+                    "required": ["action"],
+                },
+                handler=self._handle_control_shopping_list,
+                category="shopping_list",
             )
         )
 
@@ -2090,13 +2329,27 @@ NEVER call create_scene without the 'entities' parameter!""",
     async def _handle_control_climate(
         self,
         entity_id: str,
+        action: str | None = None,
         hvac_mode: str | None = None,
         temperature: float | None = None,
         target_temp_high: float | None = None,
         target_temp_low: float | None = None,
+        fan_mode: str | None = None,
+        swing_mode: str | None = None,
+        preset_mode: str | None = None,
+        humidity: float | None = None,
     ) -> dict[str, Any]:
         """Handle control_climate tool."""
         results = []
+
+        if action in ("turn_on", "turn_off"):
+            result = await call_ha_service(
+                self.hass,
+                "climate",
+                action,
+                target={"entity_id": entity_id},
+            )
+            results.append(result)
 
         if hvac_mode:
             result = await call_ha_service(
@@ -2134,6 +2387,46 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
             results.append(result)
 
+        if fan_mode is not None:
+            result = await call_ha_service(
+                self.hass,
+                "climate",
+                "set_fan_mode",
+                service_data={"fan_mode": fan_mode},
+                target={"entity_id": entity_id},
+            )
+            results.append(result)
+
+        if swing_mode is not None:
+            result = await call_ha_service(
+                self.hass,
+                "climate",
+                "set_swing_mode",
+                service_data={"swing_mode": swing_mode},
+                target={"entity_id": entity_id},
+            )
+            results.append(result)
+
+        if preset_mode is not None:
+            result = await call_ha_service(
+                self.hass,
+                "climate",
+                "set_preset_mode",
+                service_data={"preset_mode": preset_mode},
+                target={"entity_id": entity_id},
+            )
+            results.append(result)
+
+        if humidity is not None:
+            result = await call_ha_service(
+                self.hass,
+                "climate",
+                "set_humidity",
+                service_data={"humidity": humidity},
+                target={"entity_id": entity_id},
+            )
+            results.append(result)
+
         return {"results": results}
 
     async def _handle_control_cover(
@@ -2141,6 +2434,7 @@ NEVER call create_scene without the 'entities' parameter!""",
         entity_id: str,
         action: str,
         position: int | None = None,
+        tilt_position: int | None = None,
     ) -> dict[str, Any]:
         """Handle control_cover tool."""
         if action == "set_position" and position is not None:
@@ -2152,10 +2446,24 @@ NEVER call create_scene without the 'entities' parameter!""",
                 target={"entity_id": entity_id},
             )
 
+        if action == "set_tilt_position" and tilt_position is not None:
+            return await call_ha_service(
+                self.hass,
+                "cover",
+                "set_cover_tilt_position",
+                service_data={"tilt_position": tilt_position},
+                target={"entity_id": entity_id},
+            )
+
         service_map = {
             "open": "open_cover",
             "close": "close_cover",
             "stop": "stop_cover",
+            "toggle": "toggle",
+            "open_tilt": "open_cover_tilt",
+            "close_tilt": "close_cover_tilt",
+            "stop_tilt": "stop_cover_tilt",
+            "toggle_tilt": "toggle_cover_tilt",
         }
         service = service_map.get(action)
         if service is None:
@@ -2511,6 +2819,8 @@ NEVER call create_scene without the 'entities' parameter!""",
         source: str | None = None,
         shuffle: bool | None = None,
         repeat: str | None = None,
+        seek_position: float | None = None,
+        sound_mode: str | None = None,
     ) -> dict[str, Any]:
         """Handle control_media_player tool."""
         return await control_media_player(
@@ -2524,6 +2834,8 @@ NEVER call create_scene without the 'entities' parameter!""",
             source=source,
             shuffle=shuffle,
             repeat=repeat,
+            seek_position=seek_position,
+            sound_mode=sound_mode,
         )
 
     async def _handle_control_lock(
@@ -2601,6 +2913,10 @@ NEVER call create_scene without the 'entities' parameter!""",
         entity_id: str,
         action: str,
         filename: str | None = None,
+        media_player: str | None = None,
+        format: str | None = None,
+        duration: int | None = None,
+        lookback: int | None = None,
     ) -> dict[str, Any]:
         """Handle control_camera tool."""
         return await control_camera(
@@ -2608,6 +2924,10 @@ NEVER call create_scene without the 'entities' parameter!""",
             entity_id=entity_id,
             action=action,
             filename=filename,
+            media_player=media_player,
+            format=format,
+            duration=duration,
+            lookback=lookback,
         )
 
     async def _handle_control_switch(
@@ -2620,4 +2940,88 @@ NEVER call create_scene without the 'entities' parameter!""",
             self.hass,
             entity_id=entity_id,
             action=action,
+        )
+
+    # Phase 4 handlers
+
+    async def _handle_update_automation(
+        self,
+        entity_id: str,
+        alias: str | None = None,
+        description: str | None = None,
+        trigger: list[dict[str, Any]] | None = None,
+        condition: list[dict[str, Any]] | None = None,
+        action: list[dict[str, Any]] | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_automation tool."""
+        return await update_automation(
+            self.hass,
+            entity_id=entity_id,
+            alias=alias,
+            description=description,
+            trigger=trigger,
+            condition=condition,
+            action=action,
+            mode=mode,
+        )
+
+    async def _handle_update_script(
+        self,
+        entity_id: str,
+        alias: str | None = None,
+        description: str | None = None,
+        sequence: list[dict[str, Any]] | None = None,
+        mode: str | None = None,
+        icon: str | None = None,
+        fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_script tool."""
+        return await update_script(
+            self.hass,
+            entity_id=entity_id,
+            alias=alias,
+            description=description,
+            sequence=sequence,
+            mode=mode,
+            icon=icon,
+            fields=fields,
+        )
+
+    async def _handle_control_valve(
+        self,
+        entity_id: str,
+        action: str,
+        position: int | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_valve tool."""
+        return await control_valve(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            position=position,
+        )
+
+    async def _handle_control_number(
+        self,
+        entity_id: str,
+        value: float,
+    ) -> dict[str, Any]:
+        """Handle control_number tool."""
+        return await control_number(
+            self.hass,
+            entity_id=entity_id,
+            value=value,
+        )
+
+    async def _handle_control_shopping_list(
+        self,
+        action: str,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_shopping_list tool."""
+        return await control_shopping_list(
+            self.hass,
+            action=action,
+            name=name,
         )
