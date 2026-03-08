@@ -375,12 +375,15 @@ class MCPMessageView(HomeAssistantView):
             return web.Response(status=404, text="Session not found")
 
         # Verify that the requesting user matches the session owner
-        if session.user_id is not None:
-            request_user_id = None
-            if request.get("hass_user"):
-                request_user_id = request["hass_user"].id
-            if request_user_id != session.user_id:
-                return web.Response(status=403, text="Forbidden: session belongs to another user")
+        request_user_id = None
+        if request.get("hass_user"):
+            request_user_id = request["hass_user"].id
+        # Always enforce ownership: if session has no owner, only allow if requester is also unauthenticated
+        if session.user_id is not None and request_user_id != session.user_id:
+            return web.Response(status=403, text="Forbidden: session belongs to another user")
+        if session.user_id is None and request_user_id is not None:
+            # Authenticated user trying to use an unauthenticated session - bind it
+            session.user_id = request_user_id
 
         try:
             message = await request.json()

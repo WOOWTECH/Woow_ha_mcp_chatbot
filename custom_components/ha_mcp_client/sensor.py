@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -14,6 +15,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Module-level SCAN_INTERVAL overrides HA's default 30s polling
+SCAN_INTERVAL = timedelta(seconds=120)
 
 # Shared stats cache to avoid redundant file reads across sensors
 _stats_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -80,12 +84,6 @@ class _NanobotBaseSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = True
-
-    @property
-    def scan_interval(self):
-        """Use a longer scan interval to reduce file I/O."""
-        from datetime import timedelta
-        return timedelta(seconds=120)
 
 
 class NanobotMemoryEntriesSensor(_NanobotBaseSensor):

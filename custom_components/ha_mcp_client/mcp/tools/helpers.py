@@ -1,6 +1,7 @@
 """Helper functions for MCP tools."""
 
 import logging
+import re
 from typing import Any
 from datetime import date, datetime, timedelta, timezone
 
@@ -27,6 +28,33 @@ BLOCKED_SERVICES = frozenset({
     ("recorder", "disable"),
 })
 
+# Allowed base directories for camera file output
+_CAMERA_ALLOWED_DIRS = ("/config/www/", "/media/")
+
+
+def _sanitize_camera_path(filename: str) -> str:
+    """Sanitize camera snapshot/record filename to prevent path traversal.
+
+    Ensures the resolved path stays within allowed directories.
+    """
+    import os
+
+    # Resolve to catch ../ traversal
+    resolved = os.path.normpath(filename)
+
+    # Must be absolute
+    if not os.path.isabs(resolved):
+        resolved = os.path.join("/config/www", resolved)
+        resolved = os.path.normpath(resolved)
+
+    # Verify resolved path is within allowed directories
+    if not any(resolved.startswith(d.rstrip("/")) for d in _CAMERA_ALLOWED_DIRS):
+        raise ValueError(
+            f"Camera filename must be within {_CAMERA_ALLOWED_DIRS}: {filename}"
+        )
+
+    return resolved
+
 
 async def get_entity_state(hass: HomeAssistant, entity_id: str) -> dict[str, Any] | None:
     """Get the current state of an entity."""
@@ -39,10 +67,23 @@ async def get_entity_state(hass: HomeAssistant, entity_id: str) -> dict[str, Any
 
 def format_state(state: State) -> dict[str, Any]:
     """Format a state object for output."""
+    import json as _json
+
+    # Safely serialize attributes — some may contain non-serializable objects
+    try:
+        attrs = dict(state.attributes)
+        # Verify serializability; replace non-serializable values
+        _json.dumps(attrs, default=str)
+    except (TypeError, ValueError):
+        attrs = {
+            k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+            for k, v in state.attributes.items()
+        }
+
     return {
         "entity_id": state.entity_id,
         "state": state.state,
-        "attributes": dict(state.attributes),
+        "attributes": attrs,
         "last_changed": state.last_changed.isoformat(),
         "last_updated": state.last_updated.isoformat(),
     }
@@ -2000,6 +2041,14 @@ async def list_blueprints(
         }
 
 
+_BLUEPRINT_ALLOWED_HOSTS = frozenset({
+    "github.com",
+    "raw.githubusercontent.com",
+    "community.home-assistant.io",
+    "my.home-assistant.io",
+})
+
+
 async def import_blueprint(
     hass: HomeAssistant,
     url: str,
@@ -2010,6 +2059,26 @@ async def import_blueprint(
         hass: Home Assistant instance
         url: Blueprint source URL (GitHub, HA Community, etc.)
     """
+    # Validate URL scheme and host to prevent SSRF
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        return {
+            "success": False,
+            "error": "invalid_url",
+            "message": f"不支援的 URL 協定: {parsed.scheme}。僅允許 http/https。",
+        }
+    if parsed.hostname and parsed.hostname not in _BLUEPRINT_ALLOWED_HOSTS:
+        return {
+            "success": False,
+            "error": "blocked_host",
+            "message": (
+                f"不允許的來源主機: {parsed.hostname}。"
+                f"允許的來源: {', '.join(sorted(_BLUEPRINT_ALLOWED_HOSTS))}"
+            ),
+        }
+
     try:
         from homeassistant.components.blueprint import importer
 
@@ -3343,9 +3412,10 @@ async def control_camera(
 
         if action == "snapshot":
             if filename:
-                service_data["filename"] = filename
+                service_data["filename"] = _sanitize_camera_path(filename)
             else:
-                service_data["filename"] = f"/config/www/snapshot_{entity_id.split('.')[1]}.jpg"
+                safe_name = re.sub(r'[^a-z0-9_]', '', entity_id.split('.')[1])
+                service_data["filename"] = f"/config/www/snapshot_{safe_name}.jpg"
         elif action == "play_stream":
             if media_player:
                 service_data["media_player"] = media_player
@@ -3353,9 +3423,10 @@ async def control_camera(
                 service_data["format"] = format
         elif action == "record":
             if filename:
-                service_data["filename"] = filename
+                service_data["filename"] = _sanitize_camera_path(filename)
             else:
-                service_data["filename"] = f"/config/www/record_{entity_id.split('.')[1]}.mp4"
+                safe_name = re.sub(r'[^a-z0-9_]', '', entity_id.split('.')[1])
+                service_data["filename"] = f"/config/www/record_{safe_name}.mp4"
             if duration is not None:
                 service_data["duration"] = duration
             if lookback is not None:

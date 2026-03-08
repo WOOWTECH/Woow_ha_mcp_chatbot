@@ -1,5 +1,6 @@
 """MCP Tool Registry - manages all available tools."""
 
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -78,6 +79,9 @@ class ToolDefinition:
     input_schema: dict[str, Any]
     handler: Callable[..., Awaitable[Any]]
     category: str = "general"
+    # Cached handler signature — populated at registration time
+    _valid_params: frozenset[str] = field(default_factory=frozenset, repr=False)
+    _has_var_keyword: bool = field(default=False, repr=False)
 
 
 class ToolRegistry:
@@ -2410,6 +2414,14 @@ NEVER call create_scene without the 'entities' parameter!""",
 
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
+        # Cache handler signature at registration time to avoid
+        # calling inspect.signature on every tool execution.
+        sig = inspect.signature(tool.handler)
+        tool._valid_params = frozenset(sig.parameters.keys()) - {"self"}
+        tool._has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
         self._tools[tool.name] = tool
         _LOGGER.debug("Registered tool: %s", tool.name)
 
@@ -2439,18 +2451,12 @@ NEVER call create_scene without the 'entities' parameter!""",
         _LOGGER.debug("Executing tool %s with args: %s", name, arguments)
         try:
             # Filter arguments to only include expected handler parameters
-            import inspect
-            sig = inspect.signature(tool.handler)
-            valid_params = set(sig.parameters.keys()) - {"self"}
-            has_var_keyword = any(
-                p.kind == inspect.Parameter.VAR_KEYWORD
-                for p in sig.parameters.values()
-            )
-            if has_var_keyword:
+            # Uses cached signature data from registration time
+            if tool._has_var_keyword:
                 filtered_args = arguments
             else:
-                filtered_args = {k: v for k, v in arguments.items() if k in valid_params}
-                dropped = set(arguments.keys()) - valid_params
+                filtered_args = {k: v for k, v in arguments.items() if k in tool._valid_params}
+                dropped = set(arguments.keys()) - tool._valid_params
                 if dropped:
                     _LOGGER.warning("Tool %s: dropped unexpected arguments: %s", name, dropped)
 
@@ -2492,15 +2498,9 @@ NEVER call create_scene without the 'entities' parameter!""",
         service: str,
         entity_id: str | None = None,
         data: dict[str, Any] | None = None,
-        **kwargs: Any,
     ) -> dict[str, Any]:
         """Handle call_service tool."""
         service_data = data or {}
-        # Merge any extra kwargs (e.g. item, brightness) into service_data
-        # so AI models that pass service params directly still work.
-        for key, value in kwargs.items():
-            if key not in service_data:
-                service_data[key] = value
         target = None
         if entity_id:
             target = {"entity_id": entity_id}
@@ -2761,19 +2761,19 @@ NEVER call create_scene without the 'entities' parameter!""",
 
     async def _handle_system_overview(self) -> dict[str, Any]:
         """Handle system_overview tool."""
-        entity_count = len(self.hass.states.async_all())
+        all_states = self.hass.states.async_all()
         areas = await get_areas(self.hass)
         automations = await get_automations(self.hass)
         scripts = await get_scripts(self.hass)
 
-        # Count entities by domain
+        # Count entities by domain in single pass
         domain_counts: dict[str, int] = {}
-        for state in self.hass.states.async_all():
+        for state in all_states:
             domain = state.entity_id.split(".")[0]
             domain_counts[domain] = domain_counts.get(domain, 0) + 1
 
         return {
-            "total_entities": entity_count,
+            "total_entities": len(all_states),
             "areas": len(areas),
             "automations": len(automations),
             "scripts": len(scripts),
@@ -2829,6 +2829,18 @@ NEVER call create_scene without the 'entities' parameter!""",
         humidity: float | None = None,
     ) -> dict[str, Any]:
         """Handle control_climate tool."""
+        # Validate at least one control parameter is given
+        has_params = any(v is not None for v in (
+            action, hvac_mode, temperature, target_temp_high,
+            target_temp_low, fan_mode, swing_mode, preset_mode, humidity,
+        ))
+        if not has_params:
+            return {
+                "success": False,
+                "error": "missing_parameters",
+                "message": "至少需要一個控制參數 (action, hvac_mode, temperature 等)。",
+            }
+
         results = []
 
         if action in ("turn_on", "turn_off"):

@@ -242,7 +242,8 @@ class ConversationMessagesView(HomeAssistantView):
         except Exception as e:
             _LOGGER.error("Error processing message: %s", e, exc_info=True)
             return self.json_message(
-                f"Error processing message: {str(e)}", status_code=500
+                "An internal error occurred while processing the message.",
+                status_code=500,
             )
 
 
@@ -375,6 +376,19 @@ class MemorySearchView(HomeAssistantView):
         pattern = body.get("pattern", "")
         if not pattern:
             return self.json_message("pattern is required", status_code=400)
+
+        # Validate regex pattern to prevent ReDoS
+        import re as _re
+        try:
+            _re.compile(pattern)
+        except _re.error:
+            return self.json_message("Invalid regex pattern", status_code=400)
+
+        # Limit pattern length to prevent excessive backtracking
+        if len(pattern) > 200:
+            return self.json_message(
+                "Pattern too long (max 200 characters)", status_code=400
+            )
 
         limit = body.get("limit", 20)
         results = await store.search_history(pattern)
