@@ -52,17 +52,36 @@
   "options": {
     "step": {
       "init": {
-        "title": "HA MCP Client Options",
-        "description": "Modify your HA MCP Client configuration",
+        "title": "HA MCP Client Settings",
+        "description": "Current configuration:\n- **AI Provider**: {current_ai}\n- **Model**: {current_model}\n\nSelect a category below to modify settings:",
+        "data": {
+          "menu_option": "Configuration Category"
+        }
+      },
+      "ai_service": {
+        "title": "AI Service Configuration",
+        "description": "Configure your AI service provider and model",
         "data": {
           "ai_service": "AI Service Provider",
           "api_key": "API Key",
           "model": "Model",
-          "base_url": "Base URL",
-          "ollama_host": "Ollama Host URL",
+          "base_url": "Base URL (for OpenAI compatible)",
+          "ollama_host": "Ollama Host URL"
+        }
+      },
+      "conversation_settings": {
+        "title": "Conversation Settings",
+        "description": "Configure conversation history and retention",
+        "data": {
           "enable_conversation_history": "Enable conversation history",
-          "history_retention_days": "History retention (days)",
-          "system_prompt": "System prompt",
+          "history_retention_days": "History retention (days)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced Settings",
+        "description": "Configure advanced options",
+        "data": {
+          "system_prompt": "System prompt (customize AI behavior)",
           "max_tool_calls": "Maximum tool calls per message"
         }
       }

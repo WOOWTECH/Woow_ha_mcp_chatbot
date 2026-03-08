@@ -130,10 +130,32 @@ class HAMCPConversationEntity(ConversationEntity):
         """Return supported features."""
         return ConversationEntityFeature.CONTROL
 
+    def _refresh_ai_service_config(self) -> None:
+        """Refresh AI service config from runtime settings (no re-init)."""
+        if not self._ai_service:
+            return
+        overrides = self._get_runtime_settings()
+        config = self._config_entry.data
+        self._ai_service.config["temperature"] = overrides.get(
+            "temperature", config.get("temperature")
+        )
+        self._ai_service.config["max_tokens"] = overrides.get(
+            "max_tokens", config.get("max_tokens")
+        )
+        model = overrides.get("model")
+        if model and hasattr(self._ai_service, "_model"):
+            self._ai_service._model = model
+        reasoning_effort = overrides.get("reasoning_effort")
+        if reasoning_effort:
+            self._ai_service.config["reasoning_effort"] = reasoning_effort
+
     async def async_process(
         self, user_input: ConversationInput
     ) -> ConversationResult:
         """Process a conversation input."""
+        # Refresh AI params from runtime settings before each turn
+        self._refresh_ai_service_config()
+
         if self._ai_service is None:
             response = IntentResponse(language=user_input.language)
             response.async_set_speech("AI service not configured.")

@@ -82,6 +82,27 @@ class OpenAIService(AIServiceProvider):
             "messages": openai_messages,
         }
 
+        max_tokens = self.config.get("max_tokens")
+        if max_tokens:
+            # Newer OpenAI models (o1, o3, gpt-5, etc.) require
+            # max_completion_tokens instead of max_tokens.
+            if self._is_reasoning_model():
+                params["max_completion_tokens"] = max_tokens
+            else:
+                params["max_tokens"] = max_tokens
+        temperature = self.config.get("temperature")
+        if temperature is not None:
+            # Reasoning models only support temperature=1
+            if not self._is_reasoning_model():
+                params["temperature"] = temperature
+
+        # Reasoning effort for reasoning models (o1, o3, gpt-5, etc.)
+        if self._is_reasoning_model():
+            reasoning_effort = self.config.get("reasoning_effort")
+            if reasoning_effort and reasoning_effort in ("low", "medium", "high"):
+                params["reasoning_effort"] = reasoning_effort
+
+
         if tools:
             params["tools"] = [self._convert_tool_to_openai(t) for t in tools]
             params["tool_choice"] = "auto"
