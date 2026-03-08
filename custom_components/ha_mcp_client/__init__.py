@@ -39,7 +39,18 @@ from .views import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.CONVERSATION]
+PLATFORMS: list[Platform] = [
+    Platform.CONVERSATION,
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+]
+# Platforms that should always be set up, even if conversation is disabled
+ALWAYS_PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.NUMBER,
+    Platform.SELECT,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -72,8 +83,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][entry.entry_id] = data
 
         # Setup platforms
+        platforms_to_setup = list(ALWAYS_PLATFORMS)
         if data["enable_conversation"]:
-            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+            platforms_to_setup.append(Platform.CONVERSATION)
+        await hass.config_entries.async_forward_entry_setups(entry, platforms_to_setup)
 
         # Register services
         await _async_register_services(hass)
@@ -130,8 +143,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await data["recorder"].async_unload()
 
         # Unload platforms
+        platforms_to_unload = list(ALWAYS_PLATFORMS)
         if data.get("enable_conversation"):
-            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+            platforms_to_unload.append(Platform.CONVERSATION)
+        await hass.config_entries.async_unload_platforms(entry, platforms_to_unload)
 
     hass.data[DOMAIN].pop(entry.entry_id, None)
 
