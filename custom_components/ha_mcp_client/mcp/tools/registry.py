@@ -42,6 +42,12 @@ from .helpers import (
     delete_scene,
     list_blueprints,
     import_blueprint,
+    send_notification,
+    control_input_helper,
+    control_timer,
+    control_fan,
+    delete_automation,
+    delete_script,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1236,6 +1242,182 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # ===== Phase 2: P1 tools =====
+
+        self.register(
+            ToolDefinition(
+                name="send_notification",
+                description="Send a notification to a device or notification service",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Notification message content",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Notification title (optional)",
+                        },
+                        "target": {
+                            "type": "string",
+                            "description": "Notification service target (e.g., 'notify.mobile_app_phone'). Defaults to 'notify.notify' (broadcast).",
+                        },
+                        "data": {
+                            "type": "object",
+                            "description": "Extra data (image URL, action buttons, etc.)",
+                        },
+                    },
+                    "required": ["message"],
+                },
+                handler=self._handle_send_notification,
+                category="notification",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_input_helper",
+                description="Control an input helper entity (input_boolean, input_number, input_select, input_datetime, input_button, input_text)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Input helper entity ID (e.g., 'input_boolean.guest_mode')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "turn_on", "turn_off", "toggle",
+                                "set_value", "increment", "decrement",
+                                "select_option", "select_next", "select_previous", "set_options",
+                                "set_datetime", "press",
+                            ],
+                            "description": "Action to perform",
+                        },
+                        "value": {
+                            "description": "Value for set_value/select_option/set_datetime/set_options actions",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_input_helper,
+                category="input_helper",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_timer",
+                description="Control a timer entity (start, pause, cancel, finish, change duration)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Timer entity ID (e.g., 'timer.kitchen')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "pause", "cancel", "finish", "change"],
+                            "description": "Action to perform",
+                        },
+                        "duration": {
+                            "type": "string",
+                            "description": "Duration in HH:MM:SS format (for start and change actions)",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_timer,
+                category="timer",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="control_fan",
+                description="Control a fan entity (turn on/off, speed, oscillation, direction)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Fan entity ID (e.g., 'fan.bedroom')",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "turn_on", "turn_off", "toggle",
+                                "set_percentage", "set_preset_mode",
+                                "set_direction", "oscillate",
+                            ],
+                            "description": "Action to perform",
+                        },
+                        "percentage": {
+                            "type": "integer",
+                            "description": "Fan speed percentage (0-100)",
+                        },
+                        "preset_mode": {
+                            "type": "string",
+                            "description": "Preset mode name",
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["forward", "reverse"],
+                            "description": "Fan direction",
+                        },
+                        "oscillating": {
+                            "type": "boolean",
+                            "description": "Whether to oscillate",
+                        },
+                    },
+                    "required": ["entity_id", "action"],
+                },
+                handler=self._handle_control_fan,
+                category="fan",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="delete_automation",
+                description="Delete an automation (removes from automations.yaml and reloads)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Automation entity ID (e.g., 'automation.motion_light')",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_delete_automation,
+                category="automation",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="delete_script",
+                description="Delete a script (removes from scripts.yaml and reloads)",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": "Script entity ID (e.g., 'script.morning_routine')",
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_delete_script,
+                category="script",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         self._tools[tool.name] = tool
@@ -1966,4 +2148,90 @@ NEVER call create_scene without the 'entities' parameter!""",
         return await import_blueprint(
             self.hass,
             url=url,
+        )
+
+    # ===== Phase 2 handlers =====
+
+    async def _handle_send_notification(
+        self,
+        message: str,
+        title: str | None = None,
+        target: str | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Handle send_notification tool."""
+        return await send_notification(
+            self.hass,
+            message=message,
+            title=title,
+            target=target,
+            data=data,
+        )
+
+    async def _handle_control_input_helper(
+        self,
+        entity_id: str,
+        action: str,
+        value: Any = None,
+    ) -> dict[str, Any]:
+        """Handle control_input_helper tool."""
+        return await control_input_helper(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            value=value,
+        )
+
+    async def _handle_control_timer(
+        self,
+        entity_id: str,
+        action: str,
+        duration: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_timer tool."""
+        return await control_timer(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            duration=duration,
+        )
+
+    async def _handle_control_fan(
+        self,
+        entity_id: str,
+        action: str,
+        percentage: int | None = None,
+        preset_mode: str | None = None,
+        direction: str | None = None,
+        oscillating: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle control_fan tool."""
+        return await control_fan(
+            self.hass,
+            entity_id=entity_id,
+            action=action,
+            percentage=percentage,
+            preset_mode=preset_mode,
+            direction=direction,
+            oscillating=oscillating,
+        )
+
+    async def _handle_delete_automation(
+        self,
+        entity_id: str,
+    ) -> dict[str, Any]:
+        """Handle delete_automation tool."""
+        return await delete_automation(
+            self.hass,
+            entity_id=entity_id,
+        )
+
+    async def _handle_delete_script(
+        self,
+        entity_id: str,
+    ) -> dict[str, Any]:
+        """Handle delete_script tool."""
+        return await delete_script(
+            self.hass,
+            entity_id=entity_id,
         )

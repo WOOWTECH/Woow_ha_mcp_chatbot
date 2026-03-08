@@ -1975,3 +1975,485 @@ async def assign_entity_to_labels(
             "error": "assign_failed",
             "message": f"分配標籤到實體失敗：{str(e)}",
         }
+
+
+# ===== Phase 2: P1 tools =====
+
+
+async def send_notification(
+    hass: HomeAssistant,
+    message: str,
+    title: str | None = None,
+    target: str | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Send a notification via Home Assistant.
+
+    Args:
+        hass: Home Assistant instance
+        message: Notification message content
+        title: Optional notification title
+        target: Notification service target (e.g., 'notify.mobile_app_phone').
+                If not specified, uses 'notify.notify' (broadcast).
+        data: Optional extra data (image URL, action buttons, etc.)
+    """
+    try:
+        # Determine service to call
+        if target:
+            # target could be "notify.mobile_app_phone" or just "mobile_app_phone"
+            if target.startswith("notify."):
+                domain = "notify"
+                service = target.replace("notify.", "", 1)
+            else:
+                domain = "notify"
+                service = target
+        else:
+            domain = "notify"
+            service = "notify"
+
+        # Verify the service exists
+        services = hass.services.async_services()
+        notify_services = services.get("notify", {})
+        if service not in notify_services:
+            available = list(notify_services.keys())
+            return {
+                "success": False,
+                "error": "service_not_found",
+                "message": f"找不到通知服務: notify.{service}",
+                "available": [f"notify.{s}" for s in available],
+            }
+
+        service_data: dict[str, Any] = {"message": message}
+        if title is not None:
+            service_data["title"] = title
+        if data is not None:
+            service_data["data"] = data
+
+        await hass.services.async_call(
+            domain, service, service_data=service_data, blocking=True,
+        )
+
+        return {
+            "success": True,
+            "service": f"notify.{service}",
+            "message": f"通知已發送：{message[:50]}{'...' if len(message) > 50 else ''}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error sending notification: %s", e)
+        return {
+            "success": False,
+            "error": "send_failed",
+            "message": f"發送通知失敗：{str(e)}",
+        }
+
+
+async def control_input_helper(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    value: Any = None,
+) -> dict[str, Any]:
+    """Control an input helper entity (input_boolean, input_number, input_select, etc.).
+
+    Automatically routes to the correct service based on entity_id domain prefix.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Input helper entity ID (e.g., 'input_boolean.guest_mode')
+        action: Action to perform (turn_on, turn_off, toggle, set_value, increment,
+                decrement, select_option, select_next, select_previous, set_datetime, press)
+        value: Value for set_value/select_option/set_datetime actions
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到輸入輔助實體: {entity_id}",
+            }
+
+        # Extract domain from entity_id
+        domain = entity_id.split(".")[0]
+        valid_domains = {
+            "input_boolean", "input_number", "input_select",
+            "input_datetime", "input_button", "input_text",
+        }
+        if domain not in valid_domains:
+            return {
+                "success": False,
+                "error": "invalid_domain",
+                "message": f"不支援的輸入輔助類型: {domain}。支援的類型: {', '.join(sorted(valid_domains))}",
+            }
+
+        # Route action to correct domain service
+        # Map valid actions per domain
+        domain_actions = {
+            "input_boolean": {"turn_on", "turn_off", "toggle"},
+            "input_number": {"set_value", "increment", "decrement"},
+            "input_select": {"select_option", "select_next", "select_previous", "set_options"},
+            "input_datetime": {"set_datetime"},
+            "input_button": {"press"},
+            "input_text": {"set_value"},
+        }
+
+        valid_actions = domain_actions.get(domain, set())
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"{domain} 不支援 {action}。可用的動作: {', '.join(sorted(valid_actions))}",
+            }
+
+        # Build service data
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+
+        if action == "set_value" and value is not None:
+            service_data["value"] = value
+        elif action == "select_option" and value is not None:
+            service_data["option"] = value
+        elif action == "set_datetime" and value is not None:
+            # value can be datetime string, date string, or time string
+            if isinstance(value, str):
+                if "T" in value or " " in value:
+                    service_data["datetime"] = value
+                elif ":" in value:
+                    service_data["time"] = value
+                else:
+                    service_data["date"] = value
+            else:
+                service_data["datetime"] = str(value)
+        elif action == "set_options" and value is not None:
+            service_data["options"] = value
+
+        await hass.services.async_call(
+            domain, action, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"已對 {entity_id} 執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling input helper: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制輸入輔助失敗：{str(e)}",
+        }
+
+
+async def control_timer(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    duration: str | None = None,
+) -> dict[str, Any]:
+    """Control a timer entity (start, pause, cancel, finish, change).
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Timer entity ID (e.g., 'timer.kitchen')
+        action: Action to perform (start, pause, cancel, finish, change)
+        duration: Duration in HH:MM:SS format (for start and change actions)
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到計時器: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "timer":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是計時器: {entity_id}",
+            }
+
+        valid_actions = {"start", "pause", "cancel", "finish", "change"}
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用的動作: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+        if duration is not None and action in ("start", "change"):
+            service_data["duration"] = duration
+
+        await hass.services.async_call(
+            "timer", action, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"計時器 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling timer: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制計時器失敗：{str(e)}",
+        }
+
+
+async def control_fan(
+    hass: HomeAssistant,
+    entity_id: str,
+    action: str,
+    percentage: int | None = None,
+    preset_mode: str | None = None,
+    direction: str | None = None,
+    oscillating: bool | None = None,
+) -> dict[str, Any]:
+    """Control a fan entity.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Fan entity ID (e.g., 'fan.bedroom')
+        action: Action (turn_on, turn_off, toggle, set_percentage,
+                set_preset_mode, set_direction, oscillate)
+        percentage: Fan speed percentage (0-100)
+        preset_mode: Preset mode name
+        direction: Fan direction ('forward' or 'reverse')
+        oscillating: Whether to oscillate
+    """
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "entity_not_found",
+                "message": f"找不到風扇: {entity_id}",
+            }
+
+        domain = entity_id.split(".")[0]
+        if domain != "fan":
+            return {
+                "success": False,
+                "error": "invalid_entity",
+                "message": f"實體不是風扇: {entity_id}",
+            }
+
+        valid_actions = {
+            "turn_on", "turn_off", "toggle",
+            "set_percentage", "set_preset_mode", "set_direction", "oscillate",
+        }
+        if action not in valid_actions:
+            return {
+                "success": False,
+                "error": "invalid_action",
+                "message": f"不支援的動作: {action}。可用的動作: {', '.join(sorted(valid_actions))}",
+            }
+
+        service_data: dict[str, Any] = {"entity_id": entity_id}
+
+        if action == "turn_on":
+            if percentage is not None:
+                service_data["percentage"] = percentage
+            if preset_mode is not None:
+                service_data["preset_mode"] = preset_mode
+        elif action == "set_percentage" and percentage is not None:
+            service_data["percentage"] = percentage
+        elif action == "set_preset_mode" and preset_mode is not None:
+            service_data["preset_mode"] = preset_mode
+        elif action == "set_direction" and direction is not None:
+            service_data["direction"] = direction
+        elif action == "oscillate" and oscillating is not None:
+            service_data["oscillating"] = oscillating
+
+        await hass.services.async_call(
+            "fan", action, service_data=service_data, blocking=True,
+        )
+
+        new_state = hass.states.get(entity_id)
+        return {
+            "success": True,
+            "entity_id": entity_id,
+            "action": action,
+            "state": new_state.state if new_state else "unknown",
+            "message": f"風扇 {entity_id} 已執行 {action}",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error controlling fan: %s", e)
+        return {
+            "success": False,
+            "error": "control_failed",
+            "message": f"控制風扇失敗：{str(e)}",
+        }
+
+
+async def delete_automation(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Delete an automation from Home Assistant.
+
+    Removes from automations.yaml and reloads.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Automation entity ID (e.g., 'automation.motion_light')
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到自動化: {entity_id}",
+            }
+
+        automation_name = state.attributes.get("friendly_name", entity_id)
+        # Extract automation_id: the id field in automations.yaml
+        # HA stores it in the entity's unique_id or we can match by alias
+        automation_slug = entity_id.replace("automation.", "", 1)
+
+        config_path = hass.config.path("automations.yaml")
+
+        def _delete_automation():
+            try:
+                with open(config_path, "r") as f:
+                    automations = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return False
+
+            if not isinstance(automations, list):
+                return False
+
+            original_len = len(automations)
+
+            # Match by id field or by alias-derived slug
+            import re
+            automations = [
+                a for a in automations
+                if not (
+                    a.get("id", "") == automation_slug
+                    or re.sub(r'[^a-z0-9_]', '', a.get("alias", "").lower().replace(" ", "_").replace("-", "_")) == automation_slug
+                )
+            ]
+
+            if len(automations) == original_len:
+                return False
+
+            with open(config_path, "w") as f:
+                yaml.dump(automations, f, default_flow_style=False, allow_unicode=True)
+
+            return True
+
+        deleted = await hass.async_add_executor_job(_delete_automation)
+
+        if not deleted:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 automations.yaml 中找不到自動化: {entity_id}",
+            }
+
+        await hass.services.async_call("automation", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "message": f"自動化「{automation_name}」已刪除",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error deleting automation: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "message": f"刪除自動化失敗：{str(e)}",
+        }
+
+
+async def delete_script(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Delete a script from Home Assistant.
+
+    Removes from scripts.yaml and reloads.
+
+    Args:
+        hass: Home Assistant instance
+        entity_id: Script entity ID (e.g., 'script.morning_routine')
+    """
+    import yaml
+
+    try:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到腳本: {entity_id}",
+            }
+
+        script_name = state.attributes.get("friendly_name", entity_id)
+        script_id = entity_id.replace("script.", "", 1)
+
+        config_path = hass.config.path("scripts.yaml")
+
+        def _delete_script():
+            try:
+                with open(config_path, "r") as f:
+                    scripts = yaml.safe_load(f) or {}
+            except FileNotFoundError:
+                return False
+
+            if not isinstance(scripts, dict):
+                return False
+
+            if script_id not in scripts:
+                return False
+
+            del scripts[script_id]
+
+            with open(config_path, "w") as f:
+                yaml.dump(scripts, f, default_flow_style=False, allow_unicode=True)
+
+            return True
+
+        deleted = await hass.async_add_executor_job(_delete_script)
+
+        if not deleted:
+            return {
+                "success": False,
+                "error": "not_found_in_yaml",
+                "message": f"在 scripts.yaml 中找不到腳本: {entity_id}",
+            }
+
+        await hass.services.async_call("script", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "message": f"腳本「{script_name}」已刪除",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error deleting script: %s", e)
+        return {
+            "success": False,
+            "error": "delete_failed",
+            "message": f"刪除腳本失敗：{str(e)}",
+        }
