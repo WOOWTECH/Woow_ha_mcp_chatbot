@@ -1,108 +1,87 @@
-# Progress Log
+# Progress Log — HA MCP Client v1.0 發佈前測試
 
-## Session: 2026-03-07
+## Session: 2026-03-09
 
-### Phase 0: PRD & Environment Setup
+### Phase 1: 規劃與設計
 - **Status:** complete
-- Created comprehensive test PRD
-- Switched AI service to OpenAI (API key invalid, fell back to Ollama)
-- Created task_plan.md, findings.md, progress.md
+- **Started:** 2026-03-09
 
-### Phase 1: MCP Protocol Compliance (9/9 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T1.1 SSE Connection | PASS | Session established |
-| T1.2 Initialize Handshake | PASS | proto=2024-11-05, server=ha-mcp-client |
-| T1.3 Initialized Notification | PASS | Accepted silently |
-| T1.4 Ping/Pong | PASS | Empty result returned |
-| T1.5 tools/list | PASS | 31 tools returned |
-| T1.6 resources/list | PASS | 0 resources |
-| T1.7 Invalid Method Error | PASS | code=-32601 |
-| T1.8 Multi-Session | PASS | 3 unique sessions |
-| T1.9 No Auth Rejection | PASS | 401 returned |
+- Actions taken:
+  - 探索 nanobot 倉庫 README (功能列表、架構、LLM providers、channel integrations)
+  - 探索 nanobot issues (411 open issues, 分析前 36 個最相關的)
+  - 完整盤點 ha_mcp_client 功能 (77+ tools, 30+ API endpoints, 5 frontend tabs)
+  - 完整分析現有測試套件 (18 sections A-R, 234 test cases)
+  - 識別 8 個覆蓋空缺 (S-Z sections)
+  - 設計每個新 section 的詳細測試規格 (~80 new test cases)
+  - 比對 nanobot 議題，對應到具體測試場景
+  - 撰寫 task_plan.md (545 行完整測試計劃)
+  - 撰寫 findings.md (153 行研究結果)
+  - 撰寫 progress.md (本文件)
 
-### Phase 2: Tool Execution (35/35 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T2.1a get_entity_state | PASS | Returns state + attributes |
-| T2.1b search_entities(query) | PASS | Returns matching lights |
-| T2.1c search_entities(area) | PASS | Returns area entities |
-| T2.2a call_service(turn_on) | PASS | Light turned on |
-| T2.2b call_service(turn_off) | PASS | Light turned off |
-| T2.2c list_services(light) | PASS | Services listed |
-| T2.3a list_areas | PASS | 4 areas found (Unicode fixed) |
-| T2.3b create_area | PASS | Area created |
-| T2.3c update_area | PASS | Area updated |
-| T2.3d delete_area | PASS | Area deleted |
-| T2.4a-d Label CRUD | PASS | All label operations work |
-| T2.5a list_devices | PASS | Devices listed |
-| T2.6a-b Automation tools | PASS | Create/list work |
-| T2.7a-b Script tools | PASS | Create/list work |
-| T2.8a-b Scene tools | PASS | Create/list work |
-| T2.9 get_history | PASS | History returned |
-| T2.10 system_overview | PASS | 36 entities, 4 areas |
-| T2.11a-b control_light | PASS | Brightness + color_temp (BUG FIXED) |
-| T2.11c-d control_cover | PASS | Open + position |
-| T2.12 calendar_event | PASS | Graceful error (no calendar) |
-| T2.13a-e Blocked domains | PASS | All 5 domains blocked |
-| T2.14a-c Blocked services | PASS | All 3 services blocked |
+- Files created/modified:
+  - task_plan.md (覆寫 — 新的發佈前測試計劃)
+  - findings.md (覆寫 — 新的研究結果)
+  - progress.md (覆寫 — 新的進度追蹤)
 
-### Phase 3: AI Conversation (6/6 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T3.1 Basic Chat | PASS | AI responds with capabilities |
-| T3.2 Single Tool Call | PASS | Light turned on via AI |
-| T3.3 Multi-Tool | PASS | Temperature info retrieved |
-| T3.4 Complex Scene | PASS | Scene creation discussed |
-| T3.5 Context Continuity | PASS | Follow-up understood |
-| T3.6 Error Handling | PASS | Non-existent entity handled |
+- Bug fixes completed earlier in session (before planning):
+  - conversation.py: _load_history_from_recorder 傳入 conversation_id (已部署, 226 passed)
+  - frontend/app.js: loadConversations 修復 (前次 session)
+  - mcp/tools/helpers.py: delete_scene/automation YAML id 匹配 (前次 session)
+  - config_flow.py: model lists 更新 (前次 session)
 
-### Phase 4: History & Recorder (5/5 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T4.1 Message Persistence | PASS | Messages stored |
-| T4.2 Context Continuity | PASS | History loaded |
-| T4.3 Clear History | PASS | Service works |
-| T4.4 Export JSON | PASS | Export service works |
-| T4.5 Export Markdown | PASS | Export service works |
+### Phase 2-9: 新測試實施 (S-Z Sections)
+- **Status:** pending
+- Actions taken:
+  - (尚未開始)
+- Files to create/modify:
+  - tests/test_all.sh (新增 S-Z sections)
 
-### Phase 5: Security (5/5 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T5.1 Unauth SSE | PASS | 401 returned |
-| T5.2 Blocked Service (MCP) | PASS | Correctly blocked |
-| T5.3 Invalid Args | PASS | Handled gracefully |
-| T5.4 Non-existent Tool | PASS | Error returned |
-| T5.5 API Key Not In Logs | PASS | Not exposed |
+### Phase 10: 整合與驗證
+- **Status:** pending
 
-### Phase 6: E2E Integration (4/4 PASS)
-| Test | Status | Detail |
-|------|--------|--------|
-| T6.1 E2E Scene | PASS | AI confirms scene creation |
-| T6.2 E2E Automation | PASS | AI attempts automation |
-| T6.3 Integration Reload | PASS | REST API reload works |
-| T6.4 MCP After Reload | PASS | 31 tools available |
+## Test Results (Current Baseline)
 
-## Final Result: 65/65 PASS (100.0%)
+| Test | Input | Expected | Actual | Status |
+|------|-------|----------|--------|--------|
+| Existing A-R suite | bash tests/test_all.sh | 0 failures | 226 passed, 0 failed, 8 warned | PASS |
+| conversation_id fix | Deploy + restart | History per-conversation | Deployed, tests pass | PASS |
 
-## Bugs Found & Fixed
-| Bug | File | Fix |
-|-----|------|-----|
-| control_light uses "light.on" instead of "light.turn_on" | mcp/tools/registry.py | Added service_map like control_cover |
-| notifications/initialized method mismatch | mcp/server.py | Fixed in previous session |
-
-## Issues Discovered (Not Bugs)
-| Issue | Cause | Resolution |
-|-------|-------|------------|
-| OpenAI API key invalid (401) | User-provided key rejected | Fell back to Ollama |
-| Ollama DNS resolution failure | "ollama" hostname not in HA network | Used host.containers.internal |
-| Unicode escaping in JSON responses | json.dumps escapes CJK chars | Parse JSON before comparing |
+## Error Log
+| Timestamp | Error | Attempt | Resolution |
+|-----------|-------|---------|------------|
+| (none yet in planning phase) | | | |
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 7 - Report Generation (complete) |
-| Where am I going? | Done |
-| What's the goal? | Full-coverage test of ha_mcp_client - ACHIEVED |
-| What have I learned? | 1 real bug fixed, all 31 tools work, security controls solid |
-| What have I done? | 65/65 tests passing, report generated |
+| Where am I? | Phase 1 complete — planning done, ready for implementation |
+| Where am I going? | Phase 2-10: implement S-Z sections, integrate, verify |
+| What's the goal? | 300+ test cases, 0 failures, full pre-release coverage |
+| What have I learned? | 8 coverage gaps identified, nanobot has 11 matching issues |
+| What have I done? | Created 3 planning files, analyzed codebase & nanobot, designed 80 new tests |
+
+---
+
+## 新增測試 Section 摘要
+
+| Section | 測試名稱 | 預計 Cases | 優先級 |
+|---------|---------|-----------|--------|
+| S | 對話歷史隔離 | 6 | P0 |
+| T | 多 LLM Provider 切換 | 8 | P0 |
+| U | 工具調用完整性 (MCP) | 15 groups (~40 cases) | P0 |
+| V | 並發與壓力 | 6 | P1 |
+| W | 前端功能完整性 | 7 | P1 |
+| X | MCP SSE 協議完整性 | 8 | P1 |
+| Y | 安全與權限 | 8 | P0 |
+| Z | 資料完整性與清理 | 7 | P1 |
+| **Total** | | **~80** | |
+
+## Implementation Priority Order
+1. Y (安全) — P0, must have for release
+2. S (對話隔離) — P0, 剛修完 bug 需驗證
+3. T (Provider 切換) — P0, 核心功能
+4. U (工具完整性) — P0, 77+ tools 需確認
+5. X (MCP 協議) — P1, 外部整合需求
+6. V (並發) — P1, 穩定性
+7. W (前端) — P1, 用戶體驗
+8. Z (資料完整) — P1, 長期可靠性
