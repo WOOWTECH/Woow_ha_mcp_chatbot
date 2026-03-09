@@ -1,39 +1,37 @@
 blueprint:
   name: "AI 每日智慧家居報告"
   description: >
-    每天在指定時間觸發 AI 助手，自動檢查所有感測器狀態並產生
-    智慧家居摘要報告。可自訂報告內容和通知方式。
+    每天在指定時間發送通知到側邊欄通知面板。
+    可自訂通知標題和內容，適合每日狀態提醒。
   domain: automation
   input:
     report_time:
       name: "報告時間"
-      description: "每天產生報告的時間"
+      description: "每天發送通知的時間"
       default: "08:00:00"
       selector:
         time:
-    report_prompt:
-      name: "報告指令"
-      description: "給 AI 的報告指令"
+    notification_title:
+      name: "通知標題"
+      default: "🏠 每日智慧家居報告"
+      selector:
+        text:
+    report_message:
+      name: "通知訊息"
+      description: "通知的內容"
       default: >
         請檢查所有感測器狀態，包含溫度、濕度、門窗狀態等，
         並產生一份簡潔的智慧家居狀態摘要。如有異常請特別標註。
       selector:
         text:
           multiline: true
-    conversation_entity:
-      name: "AI 對話實體"
-      description: "選擇 HA MCP Client 的對話實體"
-      selector:
-        entity:
-          filter:
-            domain: conversation
 
 trigger:
   - platform: time
     at: !input report_time
 
 action:
-  - service: conversation.process
+  - service: notify.persistent_notification
     data:
-      text: !input report_prompt
-      agent_id: !input conversation_entity
+      title: !input notification_title
+      message: !input report_message

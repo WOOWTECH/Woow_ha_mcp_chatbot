@@ -1,39 +1,38 @@
 blueprint:
   name: "AI 定期裝置檢查"
   description: >
-    定期讓 AI 助手檢查指定裝置的狀態。適合監控重要感測器，
-    如伺服器室溫度、水管漏水偵測等。
+    定期發送通知到側邊欄通知面板。適合監控重要感測器，
+    如伺服器室溫度、水管漏水偵測等定時提醒。
   domain: automation
   input:
     check_interval:
       name: "檢查間隔 (分鐘)"
-      description: "多久檢查一次"
+      description: "多久發送一次通知"
       default: 30
       selector:
         number:
           min: 5
           max: 1440
           unit_of_measurement: "分鐘"
-    check_prompt:
-      name: "檢查指令"
-      description: "給 AI 的檢查指令，包含要監控的裝置"
-      default: "檢查 sensor.living_room_temperature，如果溫度超過 30 度請通知我"
+    notification_title:
+      name: "通知標題"
+      default: "🔍 定期裝置檢查"
+      selector:
+        text:
+    check_message:
+      name: "通知訊息"
+      description: "通知的內容，包含要監控的裝置資訊"
+      default: "檢查 sensor.living_room_temperature，如果溫度超過 30 度請注意"
       selector:
         text:
           multiline: true
-    conversation_entity:
-      name: "AI 對話實體"
-      selector:
-        entity:
-          filter:
-            domain: conversation
 
 trigger:
   - platform: time_pattern
     minutes: !input check_interval
 
 action:
-  - service: conversation.process
+  - service: notify.persistent_notification
     data:
-      text: !input check_prompt
-      agent_id: !input conversation_entity
+      title: !input notification_title
+      message: !input check_message
