@@ -38,7 +38,7 @@ done
 
 # If no sections specified, run all
 if [ ${#SECTIONS[@]} -eq 0 ]; then
-  SECTIONS=(A B C D E F G H I J K L M N O P Q R S T U V W X Y Z)
+  SECTIONS=(A B C D E F G H I J K L M N O P Q R S T U V W X Y Z AA)
 fi
 
 # ─── Counters ────────────────────────────────────────────────────────────────
@@ -3859,6 +3859,113 @@ print('yes' if abs(a - e) < 0.01 else 'no')
   else
     _warn "Z7: history not accessible (status=$status)"
   fi
+fi
+
+
+# =============================================================================
+# AA. HELPER CRUD TESTS
+# =============================================================================
+if [[ " ${SECTIONS[*]} " == *" AA "* ]]; then
+  echo ""
+  echo -e "${BOLD}AA. Helper CRUD Tests${NC}"
+  echo "───────────────────────────────────────"
+
+  # ── AA1. List helpers (empty or existing) ──
+  echo -e "  ${BOLD}AA1. List helpers endpoint${NC}"
+  status=$(http_get "$API/helpers")
+  assert_eq "AA1a: GET /helpers returns 200" "200" "$status"
+  aa1_count=$(body | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null)
+  _pass "AA1b: helpers list returned (count=$aa1_count)"
+
+  # ── AA1c. List helpers with type filter ──
+  status=$(http_get "$API/helpers?type=input_boolean")
+  assert_eq "AA1c: GET /helpers?type=input_boolean returns 200" "200" "$status"
+
+  # ── AA2. Create input_boolean via REST ──
+  echo -e "  ${BOLD}AA2. Create input_boolean${NC}"
+  status=$(http_post "$API/helpers" '{"type":"input_boolean","name":"Test CRUD Switch"}')
+  assert_eq "AA2: POST /helpers input_boolean → 201" "201" "$status"
+  aa2_eid=$(body | python3 -c "import sys,json; print(json.load(sys.stdin).get('entity_id',''))" 2>/dev/null)
+  if [ -z "$aa2_eid" ]; then
+    _fail "AA2b: entity_id not in response"
+    aa2_eid="input_boolean.test_crud_switch"
+  else
+    _pass "AA2b: created entity_id=$aa2_eid"
+  fi
+
+  # ── AA3. Get helper detail ──
+  echo -e "  ${BOLD}AA3. Get helper detail${NC}"
+  sleep 1
+  status=$(http_get "$API/helpers/$aa2_eid")
+  assert_eq "AA3: GET /helpers/$aa2_eid → 200" "200" "$status"
+
+  # ── AA4. Update helper ──
+  echo -e "  ${BOLD}AA4. Update helper${NC}"
+  status=$(http_patch "$API/helpers/$aa2_eid" '{"name":"Updated CRUD Switch","icon":"mdi:lightbulb"}')
+  assert_eq "AA4a: PATCH /helpers/$aa2_eid → 200" "200" "$status"
+  aa4_fields=$(body | python3 -c "import sys,json; print(json.load(sys.stdin).get('updated_fields',[]))" 2>/dev/null)
+  assert_contains "AA4b: name in updated_fields" "name" "$aa4_fields"
+
+  # ── AA5. Delete helper ──
+  echo -e "  ${BOLD}AA5. Delete helper${NC}"
+  status=$(http_delete "$API/helpers/$aa2_eid")
+  assert_eq "AA5a: DELETE /helpers/$aa2_eid → 200" "200" "$status"
+
+  # Verify gone
+  sleep 1
+  status=$(http_get "$API/helpers/$aa2_eid")
+  assert_eq "AA5b: GET after delete → 404" "404" "$status"
+
+  # ── AA6. Create input_number (full cycle) ──
+  echo -e "  ${BOLD}AA6. Create input_number${NC}"
+  status=$(http_post "$API/helpers" '{"type":"input_number","name":"Test Temp","min":0,"max":100,"step":0.5,"unit_of_measurement":"°C"}')
+  assert_eq "AA6a: POST input_number → 201" "201" "$status"
+  aa6_eid=$(body | python3 -c "import sys,json; print(json.load(sys.stdin).get('entity_id',''))" 2>/dev/null)
+  _pass "AA6b: created $aa6_eid"
+
+  # Cleanup AA6
+  sleep 1
+  http_delete "$API/helpers/$aa6_eid" > /dev/null 2>&1
+
+  # ── AA7. Create input_select (full cycle) ──
+  echo -e "  ${BOLD}AA7. Create input_select${NC}"
+  status=$(http_post "$API/helpers" '{"type":"input_select","name":"Test Mode","options":["auto","manual","off"]}')
+  assert_eq "AA7a: POST input_select → 201" "201" "$status"
+  aa7_eid=$(body | python3 -c "import sys,json; print(json.load(sys.stdin).get('entity_id',''))" 2>/dev/null)
+  _pass "AA7b: created $aa7_eid"
+
+  # Cleanup AA7
+  sleep 1
+  http_delete "$API/helpers/$aa7_eid" > /dev/null 2>&1
+
+  # ── AA8. Missing type → 400 ──
+  echo -e "  ${BOLD}AA8. Missing type field${NC}"
+  status=$(http_post "$API/helpers" '{"name":"No Type"}')
+  assert_eq "AA8: POST without type → 400" "400" "$status"
+
+  # ── AA9. Invalid type → 400 ──
+  echo -e "  ${BOLD}AA9. Invalid helper type${NC}"
+  status=$(http_post "$API/helpers" '{"type":"invalid_thing","name":"Bad"}')
+  assert_eq "AA9: POST invalid type → 400" "400" "$status"
+
+  # ── AA10. Missing required fields → 400 ──
+  echo -e "  ${BOLD}AA10. Missing required fields${NC}"
+  status=$(http_post "$API/helpers" '{"type":"input_number","name":"No Range"}')
+  assert_eq "AA10: POST input_number without min/max → 400" "400" "$status"
+
+  # ── AA11. Nonexistent entity → 404 ──
+  echo -e "  ${BOLD}AA11. Nonexistent entity${NC}"
+  status=$(http_get "$API/helpers/input_boolean.does_not_exist")
+  assert_eq "AA11a: GET nonexistent → 404" "404" "$status"
+  status=$(http_patch "$API/helpers/input_boolean.does_not_exist" '{"name":"x"}')
+  assert_eq "AA11b: PATCH nonexistent → 404" "404" "$status"
+  status=$(http_delete "$API/helpers/input_boolean.does_not_exist")
+  assert_eq "AA11c: DELETE nonexistent → 404" "404" "$status"
+
+  # ── AA12. Non-helper domain entity → 400 ──
+  echo -e "  ${BOLD}AA12. Non-helper domain${NC}"
+  status=$(http_get "$API/helpers/light.kitchen")
+  assert_eq "AA12: GET non-helper domain → 400" "400" "$status"
 fi
 
 

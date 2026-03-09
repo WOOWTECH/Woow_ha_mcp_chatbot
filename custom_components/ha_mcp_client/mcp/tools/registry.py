@@ -66,6 +66,10 @@ from .helpers import (
     control_number,
     control_shopping_list,
     cron_to_automation,
+    list_helpers_crud,
+    create_helper_crud,
+    update_helper_crud,
+    delete_helper_crud,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -2492,6 +2496,413 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # ── Helper CRUD Tools ─────────────────────────────────────────────
+
+        # list_helpers
+        self.register(
+            ToolDefinition(
+                name="list_helpers",
+                description=(
+                    "List all Helper entities in Home Assistant. "
+                    "Optionally filter by type: input_boolean, input_number, "
+                    "input_select, input_text, input_datetime, input_button, "
+                    "timer, counter."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "input_boolean", "input_number",
+                                "input_select", "input_text",
+                                "input_datetime", "input_button",
+                                "timer", "counter",
+                            ],
+                            "description": "Filter by helper type",
+                        },
+                    },
+                },
+                handler=self._handle_list_helpers,
+                category="helper",
+            )
+        )
+
+        # delete_helper
+        self.register(
+            ToolDefinition(
+                name="delete_helper",
+                description="Delete a Helper entity by its entity_id.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {
+                            "type": "string",
+                            "description": (
+                                "The entity_id of the helper to delete, "
+                                "e.g. input_boolean.my_switch"
+                            ),
+                        },
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_delete_helper,
+                category="helper",
+            )
+        )
+
+        # ── Create tools (8) ──
+
+        # create_input_boolean
+        self.register(
+            ToolDefinition(
+                name="create_input_boolean",
+                description="Create a new boolean toggle helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "icon": {"type": "string", "description": "MDI icon, e.g. mdi:toggle-switch"},
+                        "initial": {"type": "boolean", "description": "Initial value"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_input_boolean,
+                category="helper",
+            )
+        )
+
+        # create_input_number
+        self.register(
+            ToolDefinition(
+                name="create_input_number",
+                description="Create a new number input helper with min/max range.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "min": {"type": "number", "description": "Minimum value"},
+                        "max": {"type": "number", "description": "Maximum value"},
+                        "step": {"type": "number", "description": "Step increment, default 1"},
+                        "mode": {"type": "string", "enum": ["slider", "box"], "description": "Display mode"},
+                        "unit_of_measurement": {"type": "string", "description": "Unit, e.g. °C, %, kg"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "initial": {"type": "number", "description": "Initial value"},
+                    },
+                    "required": ["name", "min", "max"],
+                },
+                handler=self._handle_create_input_number,
+                category="helper",
+            )
+        )
+
+        # create_input_select
+        self.register(
+            ToolDefinition(
+                name="create_input_select",
+                description="Create a new dropdown select helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "options": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of selectable options",
+                        },
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "initial": {"type": "string", "description": "Initial selected value (must be in options)"},
+                    },
+                    "required": ["name", "options"],
+                },
+                handler=self._handle_create_input_select,
+                category="helper",
+            )
+        )
+
+        # create_input_text
+        self.register(
+            ToolDefinition(
+                name="create_input_text",
+                description="Create a new text input helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "min": {"type": "integer", "description": "Minimum length, default 0"},
+                        "max": {"type": "integer", "description": "Maximum length, default 100"},
+                        "pattern": {"type": "string", "description": "Regex validation pattern"},
+                        "mode": {"type": "string", "enum": ["text", "password"], "description": "Display mode"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "initial": {"type": "string", "description": "Initial value"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_input_text,
+                category="helper",
+            )
+        )
+
+        # create_input_datetime
+        self.register(
+            ToolDefinition(
+                name="create_input_datetime",
+                description="Create a new date/time input helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "has_date": {"type": "boolean", "description": "Include date, default true"},
+                        "has_time": {"type": "boolean", "description": "Include time, default true"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "initial": {"type": "string", "description": "Initial value, format YYYY-MM-DD HH:MM:SS"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_input_datetime,
+                category="helper",
+            )
+        )
+
+        # create_input_button
+        self.register(
+            ToolDefinition(
+                name="create_input_button",
+                description="Create a new button helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_input_button,
+                category="helper",
+            )
+        )
+
+        # create_timer
+        self.register(
+            ToolDefinition(
+                name="create_timer",
+                description="Create a new timer helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "duration": {"type": "string", "description": "Default duration, format HH:MM:SS"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "restore": {"type": "boolean", "description": "Restore state after restart"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_timer,
+                category="helper",
+            )
+        )
+
+        # create_counter
+        self.register(
+            ToolDefinition(
+                name="create_counter",
+                description="Create a new counter helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Display name"},
+                        "initial": {"type": "integer", "description": "Initial value, default 0"},
+                        "step": {"type": "integer", "description": "Step value, default 1"},
+                        "minimum": {"type": "integer", "description": "Minimum value"},
+                        "maximum": {"type": "integer", "description": "Maximum value"},
+                        "icon": {"type": "string", "description": "MDI icon"},
+                        "restore": {"type": "boolean", "description": "Restore state after restart"},
+                    },
+                    "required": ["name"],
+                },
+                handler=self._handle_create_counter,
+                category="helper",
+            )
+        )
+
+        # ── Update tools (8) ──
+
+        # update_input_boolean
+        self.register(
+            ToolDefinition(
+                name="update_input_boolean",
+                description="Update an existing boolean toggle helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string", "description": "e.g. input_boolean.my_switch"},
+                        "name": {"type": "string"},
+                        "icon": {"type": "string"},
+                        "initial": {"type": "boolean"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_boolean,
+                category="helper",
+            )
+        )
+
+        # update_input_number
+        self.register(
+            ToolDefinition(
+                name="update_input_number",
+                description="Update an existing number input helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "min": {"type": "number"},
+                        "max": {"type": "number"},
+                        "step": {"type": "number"},
+                        "mode": {"type": "string", "enum": ["slider", "box"]},
+                        "unit_of_measurement": {"type": "string"},
+                        "icon": {"type": "string"},
+                        "initial": {"type": "number"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_number,
+                category="helper",
+            )
+        )
+
+        # update_input_select
+        self.register(
+            ToolDefinition(
+                name="update_input_select",
+                description="Update an existing dropdown select helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "options": {"type": "array", "items": {"type": "string"}},
+                        "icon": {"type": "string"},
+                        "initial": {"type": "string"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_select,
+                category="helper",
+            )
+        )
+
+        # update_input_text
+        self.register(
+            ToolDefinition(
+                name="update_input_text",
+                description="Update an existing text input helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "min": {"type": "integer"},
+                        "max": {"type": "integer"},
+                        "pattern": {"type": "string"},
+                        "mode": {"type": "string", "enum": ["text", "password"]},
+                        "icon": {"type": "string"},
+                        "initial": {"type": "string"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_text,
+                category="helper",
+            )
+        )
+
+        # update_input_datetime
+        self.register(
+            ToolDefinition(
+                name="update_input_datetime",
+                description="Update an existing date/time input helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "has_date": {"type": "boolean"},
+                        "has_time": {"type": "boolean"},
+                        "icon": {"type": "string"},
+                        "initial": {"type": "string"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_datetime,
+                category="helper",
+            )
+        )
+
+        # update_input_button
+        self.register(
+            ToolDefinition(
+                name="update_input_button",
+                description="Update an existing button helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "icon": {"type": "string"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_input_button,
+                category="helper",
+            )
+        )
+
+        # update_timer
+        self.register(
+            ToolDefinition(
+                name="update_timer",
+                description="Update an existing timer helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "duration": {"type": "string"},
+                        "icon": {"type": "string"},
+                        "restore": {"type": "boolean"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_timer,
+                category="helper",
+            )
+        )
+
+        # update_counter
+        self.register(
+            ToolDefinition(
+                name="update_counter",
+                description="Update an existing counter helper.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "initial": {"type": "integer"},
+                        "step": {"type": "integer"},
+                        "minimum": {"type": "integer"},
+                        "maximum": {"type": "integer"},
+                        "icon": {"type": "string"},
+                        "restore": {"type": "boolean"},
+                    },
+                    "required": ["entity_id"],
+                },
+                handler=self._handle_update_counter,
+                category="helper",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         # Cache handler signature at registration time to avoid
@@ -4075,3 +4486,391 @@ NEVER call create_scene without the 'entities' parameter!""",
             "count": len(installed),
             "path": str(bp_dest),
         }
+
+    # ── Helper CRUD tool handlers ──
+
+    async def _handle_list_helpers(
+        self, type: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle list_helpers tool."""
+        return await list_helpers_crud(self.hass, type_filter=type)
+
+    async def _handle_delete_helper(
+        self, entity_id: str,
+    ) -> dict[str, Any]:
+        """Handle delete_helper tool."""
+        return await delete_helper_crud(self.hass, entity_id=entity_id)
+
+    # -- Create handlers (8) --
+
+    async def _handle_create_input_boolean(
+        self,
+        name: str,
+        icon: str | None = None,
+        initial: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_boolean tool."""
+        params: dict[str, Any] = {"name": name}
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await create_helper_crud(
+            self.hass, helper_type="input_boolean", **params,
+        )
+
+    async def _handle_create_input_number(
+        self,
+        name: str,
+        min: float,
+        max: float,
+        step: float | None = None,
+        mode: str | None = None,
+        unit_of_measurement: str | None = None,
+        icon: str | None = None,
+        initial: float | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_number tool."""
+        params: dict[str, Any] = {"name": name, "min": min, "max": max}
+        if step is not None:
+            params["step"] = step
+        if mode is not None:
+            params["mode"] = mode
+        if unit_of_measurement is not None:
+            params["unit_of_measurement"] = unit_of_measurement
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await create_helper_crud(
+            self.hass, helper_type="input_number", **params,
+        )
+
+    async def _handle_create_input_select(
+        self,
+        name: str,
+        options: list[str],
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_select tool."""
+        params: dict[str, Any] = {"name": name, "options": options}
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await create_helper_crud(
+            self.hass, helper_type="input_select", **params,
+        )
+
+    async def _handle_create_input_text(
+        self,
+        name: str,
+        min: int | None = None,
+        max: int | None = None,
+        pattern: str | None = None,
+        mode: str | None = None,
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_text tool."""
+        params: dict[str, Any] = {"name": name}
+        if min is not None:
+            params["min"] = min
+        if max is not None:
+            params["max"] = max
+        if pattern is not None:
+            params["pattern"] = pattern
+        if mode is not None:
+            params["mode"] = mode
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await create_helper_crud(
+            self.hass, helper_type="input_text", **params,
+        )
+
+    async def _handle_create_input_datetime(
+        self,
+        name: str,
+        has_date: bool | None = None,
+        has_time: bool | None = None,
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_datetime tool."""
+        params: dict[str, Any] = {"name": name}
+        if has_date is not None:
+            params["has_date"] = has_date
+        if has_time is not None:
+            params["has_time"] = has_time
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await create_helper_crud(
+            self.hass, helper_type="input_datetime", **params,
+        )
+
+    async def _handle_create_input_button(
+        self,
+        name: str,
+        icon: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_input_button tool."""
+        params: dict[str, Any] = {"name": name}
+        if icon is not None:
+            params["icon"] = icon
+        return await create_helper_crud(
+            self.hass, helper_type="input_button", **params,
+        )
+
+    async def _handle_create_timer(
+        self,
+        name: str,
+        duration: str | None = None,
+        icon: str | None = None,
+        restore: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_timer tool."""
+        params: dict[str, Any] = {"name": name}
+        if duration is not None:
+            params["duration"] = duration
+        if icon is not None:
+            params["icon"] = icon
+        if restore is not None:
+            params["restore"] = restore
+        return await create_helper_crud(
+            self.hass, helper_type="timer", **params,
+        )
+
+    async def _handle_create_counter(
+        self,
+        name: str,
+        initial: int | None = None,
+        step: int | None = None,
+        minimum: int | None = None,
+        maximum: int | None = None,
+        icon: str | None = None,
+        restore: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle create_counter tool."""
+        params: dict[str, Any] = {"name": name}
+        if initial is not None:
+            params["initial"] = initial
+        if step is not None:
+            params["step"] = step
+        if minimum is not None:
+            params["minimum"] = minimum
+        if maximum is not None:
+            params["maximum"] = maximum
+        if icon is not None:
+            params["icon"] = icon
+        if restore is not None:
+            params["restore"] = restore
+        return await create_helper_crud(
+            self.hass, helper_type="counter", **params,
+        )
+
+    # -- Update handlers (8) --
+
+    async def _handle_update_input_boolean(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        icon: str | None = None,
+        initial: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_boolean tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_input_number(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        min: float | None = None,
+        max: float | None = None,
+        step: float | None = None,
+        mode: str | None = None,
+        unit_of_measurement: str | None = None,
+        icon: str | None = None,
+        initial: float | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_number tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if min is not None:
+            params["min"] = min
+        if max is not None:
+            params["max"] = max
+        if step is not None:
+            params["step"] = step
+        if mode is not None:
+            params["mode"] = mode
+        if unit_of_measurement is not None:
+            params["unit_of_measurement"] = unit_of_measurement
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_input_select(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        options: list[str] | None = None,
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_select tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if options is not None:
+            params["options"] = options
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_input_text(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        min: int | None = None,
+        max: int | None = None,
+        pattern: str | None = None,
+        mode: str | None = None,
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_text tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if min is not None:
+            params["min"] = min
+        if max is not None:
+            params["max"] = max
+        if pattern is not None:
+            params["pattern"] = pattern
+        if mode is not None:
+            params["mode"] = mode
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_input_datetime(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        has_date: bool | None = None,
+        has_time: bool | None = None,
+        icon: str | None = None,
+        initial: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_datetime tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if has_date is not None:
+            params["has_date"] = has_date
+        if has_time is not None:
+            params["has_time"] = has_time
+        if icon is not None:
+            params["icon"] = icon
+        if initial is not None:
+            params["initial"] = initial
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_input_button(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        icon: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_input_button tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if icon is not None:
+            params["icon"] = icon
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_timer(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        duration: str | None = None,
+        icon: str | None = None,
+        restore: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_timer tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if duration is not None:
+            params["duration"] = duration
+        if icon is not None:
+            params["icon"] = icon
+        if restore is not None:
+            params["restore"] = restore
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )
+
+    async def _handle_update_counter(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        initial: int | None = None,
+        step: int | None = None,
+        minimum: int | None = None,
+        maximum: int | None = None,
+        icon: str | None = None,
+        restore: bool | None = None,
+    ) -> dict[str, Any]:
+        """Handle update_counter tool."""
+        params: dict[str, Any] = {}
+        if name is not None:
+            params["name"] = name
+        if initial is not None:
+            params["initial"] = initial
+        if step is not None:
+            params["step"] = step
+        if minimum is not None:
+            params["minimum"] = minimum
+        if maximum is not None:
+            params["maximum"] = maximum
+        if icon is not None:
+            params["icon"] = icon
+        if restore is not None:
+            params["restore"] = restore
+        return await update_helper_crud(
+            self.hass, entity_id=entity_id, **params,
+        )

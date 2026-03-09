@@ -874,6 +874,119 @@ class CronBlueprintsInstallView(HomeAssistantView):
         })
 
 
+# ── Helper CRUD views ──
+
+
+def _get_helpers_crud(hass: HomeAssistant):
+    """Create a HelpersCrud instance (stateless — only needs hass)."""
+    from .nanobot.helpers_crud import HelpersCrud
+    return HelpersCrud(hass)
+
+
+class HelpersListView(HomeAssistantView):
+    """View to list helpers or create a new helper."""
+
+    url = f"/api/{DOMAIN}/helpers"
+    name = f"api:{DOMAIN}:helpers"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """List all helper entities, optionally filtered by type."""
+        hass = request.app["hass"]
+        crud = _get_helpers_crud(hass)
+
+        type_filter = request.query.get("type")
+        helpers = await crud.list_helpers(type_filter=type_filter)
+        return self.json({"helpers": helpers, "count": len(helpers)})
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Create a new helper entity."""
+        hass = request.app["hass"]
+        crud = _get_helpers_crud(hass)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json_message("Invalid JSON", status_code=400)
+
+        helper_type = body.pop("type", None)
+        if not helper_type:
+            return self.json_message(
+                "Field 'type' is required", status_code=400,
+            )
+
+        result = await crud.create_helper(helper_type, **body)
+        if "error" in result:
+            code = 400
+            err = result["error"]
+            if "not available" in err or "not loaded" in err:
+                code = 503
+            return self.json_message(err, status_code=code)
+        return self.json(result, status_code=201)
+
+
+class HelperDetailView(HomeAssistantView):
+    """View to get, update, or delete a single helper entity."""
+
+    url = f"/api/{DOMAIN}/helpers/{{entity_id}}"
+    name = f"api:{DOMAIN}:helper_detail"
+    requires_auth = True
+
+    async def get(
+        self, request: web.Request, entity_id: str,
+    ) -> web.Response:
+        """Get a helper's details."""
+        hass = request.app["hass"]
+        crud = _get_helpers_crud(hass)
+
+        result = await crud.get_helper(entity_id)
+        if "error" in result:
+            code = 404 if "not found" in result["error"] else 400
+            return self.json_message(result["error"], status_code=code)
+        return self.json(result)
+
+    async def patch(
+        self, request: web.Request, entity_id: str,
+    ) -> web.Response:
+        """Update a helper entity."""
+        hass = request.app["hass"]
+        crud = _get_helpers_crud(hass)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json_message("Invalid JSON", status_code=400)
+
+        result = await crud.update_helper(entity_id, **body)
+        if "error" in result:
+            code = 400
+            err = result["error"]
+            if "not found" in err:
+                code = 404
+            elif "not available" in err:
+                code = 503
+            return self.json_message(err, status_code=code)
+        return self.json(result)
+
+    async def delete(
+        self, request: web.Request, entity_id: str,
+    ) -> web.Response:
+        """Delete a helper entity."""
+        hass = request.app["hass"]
+        crud = _get_helpers_crud(hass)
+
+        result = await crud.delete_helper(entity_id)
+        if "error" in result:
+            code = 400
+            err = result["error"]
+            if "not found" in err:
+                code = 404
+            elif "not available" in err:
+                code = 503
+            return self.json_message(err, status_code=code)
+        return self.json(result)
+
+
 def _get_config_entry(hass: HomeAssistant):
     """Get the first config entry and its data dict."""
     for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():

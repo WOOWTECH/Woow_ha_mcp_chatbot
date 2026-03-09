@@ -4277,3 +4277,53 @@ async def cron_to_automation(
             "error": "conversion_failed",
             "message": f"轉換失敗：{str(e)}",
         }
+
+
+# ── Helper CRUD functions ─────────────────────────────────────────────────────
+
+
+async def list_helpers_crud(
+    hass: HomeAssistant,
+    type_filter: str | None = None,
+) -> dict[str, Any]:
+    """List all helper entities, optionally filtered by type."""
+    from ...nanobot.helpers_crud import HelpersCrud
+
+    crud = HelpersCrud(hass)
+    helpers = await crud.list_helpers(type_filter=type_filter)
+    return {"helpers": helpers, "count": len(helpers)}
+
+
+async def create_helper_crud(
+    hass: HomeAssistant,
+    helper_type: str,
+    **params: Any,
+) -> dict[str, Any]:
+    """Create a helper entity of the specified type."""
+    from ...nanobot.helpers_crud import HelpersCrud
+
+    crud = HelpersCrud(hass)
+    return await crud.create_helper(helper_type, **params)
+
+
+async def update_helper_crud(
+    hass: HomeAssistant,
+    entity_id: str,
+    **params: Any,
+) -> dict[str, Any]:
+    """Update a helper entity."""
+    from ...nanobot.helpers_crud import HelpersCrud
+
+    crud = HelpersCrud(hass)
+    return await crud.update_helper(entity_id, **params)
+
+
+async def delete_helper_crud(
+    hass: HomeAssistant,
+    entity_id: str,
+) -> dict[str, Any]:
+    """Delete a helper entity."""
+    from ...nanobot.helpers_crud import HelpersCrud
+
+    crud = HelpersCrud(hass)
+    return await crud.delete_helper(entity_id)

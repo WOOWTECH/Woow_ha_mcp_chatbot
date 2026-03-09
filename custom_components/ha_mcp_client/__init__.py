@@ -52,6 +52,8 @@ from .views import (
     CronToAutomationView,
     CronBlueprintsListView,
     CronBlueprintsInstallView,
+    HelpersListView,
+    HelperDetailView,
     LLMProvidersView,
     ActiveLLMView,
     SettingsView,
@@ -159,6 +161,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(CronToAutomationView())
         hass.http.register_view(CronBlueprintsListView())
         hass.http.register_view(CronBlueprintsInstallView())
+        hass.http.register_view(HelpersListView())
+        hass.http.register_view(HelperDetailView())
         hass.http.register_view(LLMProvidersView())
         hass.http.register_view(ActiveLLMView())
         hass.http.register_view(SettingsView())
