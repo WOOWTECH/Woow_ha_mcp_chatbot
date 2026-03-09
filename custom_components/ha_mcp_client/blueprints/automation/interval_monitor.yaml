@@ -1,8 +1,8 @@
 blueprint:
   name: "AI 間隔監控與警報"
   description: >
-    每隔指定時間讓 AI 檢查特定條件，如溫度、能源用量等，
-    超過閾值時由 AI 分析原因並發送通知。
+    每隔指定時間發送監控提醒通知到側邊欄通知面板。
+    適合定期檢查溫度、能源用量等感測器狀態。
   domain: automation
   input:
     monitor_interval:
@@ -13,9 +13,14 @@ blueprint:
           min: 1
           max: 1440
           unit_of_measurement: "分鐘"
+    notification_title:
+      name: "通知標題"
+      default: "📊 間隔監控提醒"
+      selector:
+        text:
     monitor_prompt:
       name: "監控指令"
-      description: "給 AI 的監控與通知指令"
+      description: "通知的監控內容"
       default: >
         檢查以下感測器：
         1. sensor.living_room_temperature — 如果超過 28°C 通知我
@@ -24,19 +29,13 @@ blueprint:
       selector:
         text:
           multiline: true
-    conversation_entity:
-      name: "AI 對話實體"
-      selector:
-        entity:
-          filter:
-            domain: conversation
 
 trigger:
   - platform: time_pattern
     minutes: !input monitor_interval
 
 action:
-  - service: conversation.process
+  - service: notify.persistent_notification
     data:
-      text: !input monitor_prompt
-      agent_id: !input conversation_entity
+      title: !input notification_title
+      message: !input monitor_prompt

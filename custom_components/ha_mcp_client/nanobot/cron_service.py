@@ -42,6 +42,7 @@ class CronService:
         self._jobs: dict[str, CronJob] = {}
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._sync: Any = None  # CronAutomationSync, set in async_setup
 
     async def async_setup(self) -> None:
         """Initialize the cron service: load store and start tick loop."""
@@ -56,9 +57,22 @@ class CronService:
             sum(1 for j in self._jobs.values() if j.enabled),
         )
 
+        # Initialize bidirectional sync with HA automations
+        try:
+            from .cron_automation_sync import CronAutomationSync
+            self._sync = CronAutomationSync(self.hass, self)
+            await self._sync.async_setup()
+            _LOGGER.info("CronAutomationSync initialized")
+        except Exception as e:
+            _LOGGER.warning("Could not initialize CronAutomationSync: %s", e)
+            self._sync = None
+
     async def async_stop(self) -> None:
         """Stop the cron service."""
         self._running = False
+        if self._sync:
+            await self._sync.async_teardown()
+            self._sync = None
         if self._timer_task and not self._timer_task.done():
             self._timer_task.cancel()
             try:
@@ -170,9 +184,7 @@ class CronService:
         job.updated_at_ms = _now_ms()
 
     async def _execute_agent_turn(self, job: CronJob) -> None:
-        """Trigger an AI conversation turn."""
-        from .cron_types import _now_ms  # noqa: already imported at top
-
+        """Trigger an AI conversation turn and send reply to persistent_notification."""
         self.hass.bus.async_fire(
             "ha_mcp_client_cron_agent_turn",
             {
@@ -182,7 +194,7 @@ class CronService:
             },
         )
 
-        # Also try to call conversation.process directly
+        # Call conversation.process with blocking=True to capture AI response
         try:
             from ..const import DOMAIN
             agent_id = None
@@ -192,15 +204,37 @@ class CronService:
                     break
 
             if agent_id and job.payload.message:
-                await self.hass.services.async_call(
+                result = await self.hass.services.async_call(
                     "conversation",
                     "process",
                     {
                         "text": job.payload.message,
                         "agent_id": agent_id,
                     },
-                    blocking=False,
+                    blocking=True,
+                    return_response=True,
                 )
+
+                # Extract AI response
+                ai_response = ""
+                if result and "response" in result:
+                    speech = result["response"].get("speech", {})
+                    if isinstance(speech, dict):
+                        ai_response = speech.get("plain", {}).get("speech", "")
+                    elif isinstance(speech, str):
+                        ai_response = speech
+
+                # Send AI reply to persistent_notification
+                if ai_response:
+                    await self.hass.services.async_call(
+                        "notify",
+                        "persistent_notification",
+                        {
+                            "title": f"🤖 AI 排程回覆：{job.name}",
+                            "message": ai_response,
+                        },
+                        blocking=False,
+                    )
         except Exception as e:
             _LOGGER.warning("Could not trigger conversation for cron job: %s", e)
 
@@ -319,6 +353,14 @@ class CronService:
         self._arm_timer()
 
         _LOGGER.info("Added cron job: %s (%s)", job.name, job.id)
+
+        # Forward sync: create matching automation
+        if self._sync:
+            try:
+                await self._sync.on_job_added(job)
+            except Exception as e:
+                _LOGGER.warning("Sync on add_job failed: %s", e)
+
         return job
 
     async def remove_job(self, job_id: str) -> bool:
@@ -328,6 +370,14 @@ class CronService:
         del self._jobs[job_id]
         await self._save_store()
         self._arm_timer()
+
+        # Forward sync: remove matching automation
+        if self._sync:
+            try:
+                await self._sync.on_job_removed(job_id)
+            except Exception as e:
+                _LOGGER.warning("Sync on remove_job failed: %s", e)
+
         return True
 
     async def update_job(self, job_id: str, updates: dict[str, Any]) -> CronJob | None:
@@ -356,6 +406,14 @@ class CronService:
 
         await self._save_store()
         self._arm_timer()
+
+        # Forward sync: update matching automation
+        if self._sync:
+            try:
+                await self._sync.on_job_updated(job)
+            except Exception as e:
+                _LOGGER.warning("Sync on update_job failed: %s", e)
+
         return job
 
     async def get_job(self, job_id: str) -> CronJob | None:

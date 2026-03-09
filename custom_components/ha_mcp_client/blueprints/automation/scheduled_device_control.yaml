@@ -1,8 +1,8 @@
 blueprint:
   name: "AI 排程裝置控制"
   description: >
-    在指定時間讓 AI 助手執行裝置控制指令。AI 會理解語意並
-    呼叫適當的服務。適合需要條件判斷的排程控制。
+    在指定時間發送控制指令通知到側邊欄通知面板。
+    適合排程提醒需要執行的裝置操作。
   domain: automation
   input:
     schedule_time:
@@ -10,6 +10,11 @@ blueprint:
       default: "22:00:00"
       selector:
         time:
+    notification_title:
+      name: "通知標題"
+      default: "🎛️ 排程裝置控制"
+      selector:
+        text:
     control_prompt:
       name: "控制指令"
       description: "用自然語言描述要執行的操作"
@@ -17,19 +22,13 @@ blueprint:
       selector:
         text:
           multiline: true
-    conversation_entity:
-      name: "AI 對話實體"
-      selector:
-        entity:
-          filter:
-            domain: conversation
 
 trigger:
   - platform: time
     at: !input schedule_time
 
 action:
-  - service: conversation.process
+  - service: notify.persistent_notification
     data:
-      text: !input control_prompt
-      agent_id: !input conversation_entity
+      title: !input notification_title
+      message: !input control_prompt

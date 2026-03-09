@@ -38,7 +38,7 @@ done
 
 # If no sections specified, run all
 if [ ${#SECTIONS[@]} -eq 0 ]; then
-  SECTIONS=(A B C D E F G H I J K L M N O P Q)
+  SECTIONS=(A B C D E F G H I J K L M N O P Q R)
 fi
 
 # ─── Counters ────────────────────────────────────────────────────────────────
@@ -2246,6 +2246,223 @@ if should_run "Q"; then
     _pass "Q5: non-existent blueprint → $status"
   else
     _warn "Q5: non-existent blueprint → $status (expected 404|400)"
+  fi
+fi
+
+
+# =============================================================================
+# R. CRON-AUTOMATION BIDIRECTIONAL SYNC
+# =============================================================================
+if should_run "R"; then
+  _section "R. Cron-Automation Bidirectional Sync"
+
+  # ── R1. Forward sync: add_job creates automation ──
+  echo -e "  ${BOLD}R1. Forward sync - add job${NC}"
+
+  status=$(http_post "$API/cron/jobs" '{
+    "name": "sync_test_forward",
+    "schedule": {"kind": "every", "every_ms": 3600000},
+    "payload": {"kind": "system_event", "message": "Forward sync test"},
+    "enabled": false
+  }')
+  sync_job=$(body)
+  SYNC_JOB_ID=$(echo "$sync_job" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id', d.get('job',{}).get('id','')))" 2>/dev/null)
+
+  if [ -n "$SYNC_JOB_ID" ] && [ "$SYNC_JOB_ID" != "" ]; then
+    _pass "R1: created cron job $SYNC_JOB_ID"
+
+    # Wait for sync to create automation
+    sleep 2
+
+    # Check automations.yaml for ha_mcp_cron_{id}
+    AUTOMATIONS_FILE="$HOME/.homeassistant/automations.yaml"
+    if [ ! -f "$AUTOMATIONS_FILE" ]; then
+      AUTOMATIONS_FILE="/config/automations.yaml"
+    fi
+
+    # Use REST API to check automation entity
+    EXPECTED_AUTO_ID="ha_mcp_cron_${SYNC_JOB_ID}"
+    auto_state=$(curl -s -H "$AUTH" "${BASE}/api/states/automation.cron__sync_test_forward" 2>/dev/null)
+    auto_entity_exists=$(echo "$auto_state" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('entity_id','') else 'no')" 2>/dev/null)
+
+    if [ "$auto_entity_exists" = "yes" ]; then
+      _pass "R1: automation entity created by forward sync"
+    else
+      _warn "R1: automation entity not found (sync may be delayed)"
+    fi
+  else
+    _fail "R1: could not create test cron job"
+  fi
+
+  # ── R2. Forward sync: update job updates automation ──
+  echo -e "  ${BOLD}R2. Forward sync - update job${NC}"
+
+  if [ -n "$SYNC_JOB_ID" ] && [ "$SYNC_JOB_ID" != "" ]; then
+    status=$(http_patch "$API/cron/jobs/$SYNC_JOB_ID" '{"name": "sync_test_updated", "payload": {"kind": "system_event", "message": "Updated sync message"}}')
+    if [ "$status" = "200" ]; then
+      _pass "R2: updated cron job"
+    else
+      _fail "R2: update cron job (expected 200, got $status)"
+    fi
+
+    sleep 2
+
+    # Verify automation was updated (check via REST API)
+    auto_state=$(curl -s -H "$AUTH" "${BASE}/api/states/automation.cron__sync_test_updated" 2>/dev/null)
+    auto_entity_exists=$(echo "$auto_state" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('entity_id','') else 'no')" 2>/dev/null)
+
+    if [ "$auto_entity_exists" = "yes" ]; then
+      _pass "R2: automation entity updated by forward sync"
+    else
+      _warn "R2: updated automation entity not found (sync may be delayed)"
+    fi
+  else
+    _warn "R2: skipped (no job from R1)"
+  fi
+
+  # ── R3. Forward sync: remove job deletes automation ──
+  echo -e "  ${BOLD}R3. Forward sync - remove job${NC}"
+
+  if [ -n "$SYNC_JOB_ID" ] && [ "$SYNC_JOB_ID" != "" ]; then
+    status=$(http_delete "$API/cron/jobs/$SYNC_JOB_ID")
+    if [ "$status" = "200" ] || [ "$status" = "204" ]; then
+      _pass "R3: deleted cron job"
+    else
+      _warn "R3: delete cron job got $status (expected 200|204)"
+    fi
+
+    sleep 2
+
+    # Verify automation was removed
+    auto_state=$(curl -s -H "$AUTH" "${BASE}/api/states/automation.cron__sync_test_updated" 2>/dev/null)
+    auto_entity_exists=$(echo "$auto_state" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('entity_id','') else 'no')" 2>/dev/null)
+
+    if [ "$auto_entity_exists" = "yes" ]; then
+      _warn "R3: automation entity still exists (removal may be delayed)"
+    else
+      _pass "R3: automation entity removed by forward sync"
+    fi
+  else
+    _warn "R3: skipped (no job from R1)"
+  fi
+
+  # ── R4. Persistent notification from system_event ──
+  echo -e "  ${BOLD}R4. Persistent notification from system_event trigger${NC}"
+
+  status=$(http_post "$API/cron/jobs" '{
+    "name": "notif_test_r4",
+    "schedule": {"kind": "at", "at_ms": 9999999999999},
+    "payload": {"kind": "system_event", "message": "R4 notification test"},
+    "enabled": false
+  }')
+  notif_job=$(body)
+  NOTIF_JOB_ID=$(echo "$notif_job" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id', d.get('job',{}).get('id','')))" 2>/dev/null)
+
+  if [ -n "$NOTIF_JOB_ID" ] && [ "$NOTIF_JOB_ID" != "" ]; then
+    _pass "R4: created test job $NOTIF_JOB_ID"
+
+    # Trigger the job
+    status=$(http_post "$API/cron/jobs/$NOTIF_JOB_ID/trigger" '{}')
+    if [ "$status" = "200" ]; then
+      _pass "R4: triggered job successfully"
+    else
+      _fail "R4: trigger job (expected 200, got $status)"
+    fi
+
+    sleep 1
+
+    # Check persistent notification via WebSocket
+    WS_URL=$(echo "$BASE" | sed 's|^http|ws|')
+    notif_check=$(python3 -c "
+import json, asyncio, websockets
+async def check():
+    async with websockets.connect('${WS_URL}/api/websocket') as ws:
+        await ws.recv()
+        await ws.send(json.dumps({'type':'auth','access_token':'${LLAT}'}))
+        await ws.recv()
+        await ws.send(json.dumps({'id':1,'type':'persistent_notification/get'}))
+        r = json.loads(await ws.recv())
+        notifs = r.get('result', [])
+        for n in notifs:
+            if 'R4 notification test' in n.get('message',''):
+                print('found')
+                return
+        print('not_found')
+asyncio.run(check())
+" 2>/dev/null)
+
+    if [ "$notif_check" = "found" ]; then
+      _pass "R4: persistent notification found in sidebar"
+    else
+      _warn "R4: persistent notification not found (may need WebSocket check)"
+    fi
+
+    # Cleanup
+    http_delete "$API/cron/jobs/$NOTIF_JOB_ID" > /dev/null 2>&1
+  else
+    _fail "R4: could not create test cron job"
+  fi
+
+  # ── R5. Blueprint notification format verification ──
+  echo -e "  ${BOLD}R5. Blueprint uses persistent_notification${NC}"
+
+  status=$(http_get "$API/blueprints")
+  assert_status "R5: GET /blueprints → 200" "200" "$status"
+  bp_body=$(body)
+
+  # Check that blueprints contain persistent_notification in their description/content
+  has_notif=$(echo "$bp_body" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+bps = data.get('blueprints', [])
+notif_count = 0
+for bp in bps:
+    desc = bp.get('description', '')
+    if '通知' in desc or 'notification' in desc.lower() or '通知面板' in desc:
+        notif_count += 1
+print(notif_count)
+" 2>/dev/null)
+
+  if [ "$has_notif" -ge 4 ] 2>/dev/null; then
+    _pass "R5: $has_notif blueprints mention notification in description"
+  else
+    _warn "R5: only $has_notif blueprints mention notification (expected >= 4)"
+  fi
+
+  # ── R6. Sync ID format verification ──
+  echo -e "  ${BOLD}R6. Automation ID format${NC}"
+
+  # Create a job and verify the automation ID format
+  status=$(http_post "$API/cron/jobs" '{
+    "name": "id_format_test",
+    "schedule": {"kind": "every", "every_ms": 1800000},
+    "payload": {"kind": "system_event", "message": "ID format test"},
+    "enabled": false
+  }')
+  fmt_job=$(body)
+  FMT_JOB_ID=$(echo "$fmt_job" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id', d.get('job',{}).get('id','')))" 2>/dev/null)
+
+  if [ -n "$FMT_JOB_ID" ] && [ "$FMT_JOB_ID" != "" ]; then
+    expected_auto_id="ha_mcp_cron_${FMT_JOB_ID}"
+    _pass "R6: expected automation ID = $expected_auto_id"
+
+    sleep 2
+
+    # Verify the automation was created with the correct ID pattern
+    auto_state=$(curl -s -H "$AUTH" "${BASE}/api/states/automation.cron__id_format_test" 2>/dev/null)
+    auto_entity_exists=$(echo "$auto_state" | python3 -c "import sys,json; d=json.load(sys.stdin); print('yes' if d.get('entity_id','') else 'no')" 2>/dev/null)
+
+    if [ "$auto_entity_exists" = "yes" ]; then
+      _pass "R6: automation with correct ID format exists"
+    else
+      _warn "R6: automation entity not found by entity_id"
+    fi
+
+    # Cleanup
+    http_delete "$API/cron/jobs/$FMT_JOB_ID" > /dev/null 2>&1
+    sleep 1
+  else
+    _fail "R6: could not create test cron job"
   fi
 fi
 

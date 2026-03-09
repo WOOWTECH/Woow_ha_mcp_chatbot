@@ -417,13 +417,14 @@ async def create_automation(
     description: str | None = None,
     mode: str = "single",
     condition: list[dict[str, Any]] | None = None,
+    automation_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a new automation in Home Assistant."""
     import uuid
 
     try:
-        # Generate unique ID
-        automation_id = str(uuid.uuid4()).replace("-", "")[:12]
+        # Use provided ID or generate unique ID
+        automation_id = automation_id or str(uuid.uuid4()).replace("-", "")[:12]
 
         # Build automation config
         config = {
@@ -482,6 +483,131 @@ async def create_automation(
             "success": False,
             "error": "creation_failed",
             "message": f"建立自動化失敗：{str(e)}",
+        }
+
+
+async def update_automation(
+    hass: HomeAssistant,
+    automation_id: str,
+    trigger: list[dict[str, Any]] | None = None,
+    action: list[dict[str, Any]] | None = None,
+    alias: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Update an existing automation in automations.yaml by ID."""
+    import yaml
+
+    try:
+        config_path = hass.config.path("automations.yaml")
+
+        def _update():
+            try:
+                with open(config_path, "r") as f:
+                    existing = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return False
+
+            if not isinstance(existing, list):
+                return False
+
+            found = False
+            for auto in existing:
+                if auto.get("id") == automation_id:
+                    if trigger is not None:
+                        auto["trigger"] = trigger
+                    if action is not None:
+                        auto["action"] = action
+                    if alias is not None:
+                        auto["alias"] = alias
+                    if description is not None:
+                        auto["description"] = description
+                    found = True
+                    break
+
+            if not found:
+                return False
+
+            with open(config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+            return True
+
+        found = await hass.async_add_executor_job(_update)
+        if not found:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到 ID 為 {automation_id} 的自動化",
+            }
+
+        await hass.services.async_call("automation", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "automation_id": automation_id,
+            "message": f"自動化 {automation_id} 已更新",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error updating automation %s: %s", automation_id, e)
+        return {
+            "success": False,
+            "error": "update_failed",
+            "message": f"更新自動化失敗：{str(e)}",
+        }
+
+
+async def remove_automation(
+    hass: HomeAssistant,
+    automation_id: str,
+) -> dict[str, Any]:
+    """Remove an automation from automations.yaml by ID."""
+    import yaml
+
+    try:
+        config_path = hass.config.path("automations.yaml")
+
+        def _remove():
+            try:
+                with open(config_path, "r") as f:
+                    existing = yaml.safe_load(f) or []
+            except FileNotFoundError:
+                return False
+
+            if not isinstance(existing, list):
+                return False
+
+            original_len = len(existing)
+            existing[:] = [a for a in existing if a.get("id") != automation_id]
+
+            if len(existing) == original_len:
+                return False
+
+            with open(config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False, allow_unicode=True)
+            return True
+
+        found = await hass.async_add_executor_job(_remove)
+        if not found:
+            return {
+                "success": False,
+                "error": "not_found",
+                "message": f"找不到 ID 為 {automation_id} 的自動化",
+            }
+
+        await hass.services.async_call("automation", "reload", blocking=True)
+
+        return {
+            "success": True,
+            "automation_id": automation_id,
+            "message": f"自動化 {automation_id} 已刪除",
+        }
+
+    except Exception as e:
+        _LOGGER.error("Error removing automation %s: %s", automation_id, e)
+        return {
+            "success": False,
+            "error": "remove_failed",
+            "message": f"刪除自動化失敗：{str(e)}",
         }
 
 
@@ -4044,13 +4170,22 @@ def _payload_to_action(hass: HomeAssistant, payload) -> list[dict[str, Any]]:
                 "找不到 HA MCP Client 對話實體，請確認整合已啟用 conversation"
             )
 
-        return [{
-            "service": "conversation.process",
-            "data": {
-                "text": payload.message,
-                "agent_id": agent_id,
+        return [
+            {
+                "service": "conversation.process",
+                "data": {
+                    "text": payload.message,
+                    "agent_id": agent_id,
+                },
             },
-        }]
+            {
+                "service": "notify.persistent_notification",
+                "data": {
+                    "title": "🤖 AI 排程通知",
+                    "message": payload.message,
+                },
+            },
+        ]
 
     elif payload.kind == "system_event":
         return [

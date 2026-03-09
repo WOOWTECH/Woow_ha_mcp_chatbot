@@ -34,3 +34,7 @@ action:
       message: !input event_message
       source: "blueprint_cron_event_trigger"
       triggered_at: "{{ now().isoformat() }}"
+  - service: notify.persistent_notification
+    data:
+      title: "📡 定時事件觸發"
+      message: !input event_message
