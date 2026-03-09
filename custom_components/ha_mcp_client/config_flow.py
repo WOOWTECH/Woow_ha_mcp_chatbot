@@ -186,13 +186,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: config_entries.
             AI_SERVICE_OPENAI_COMPATIBLE: "OpenAI Compatible",
         }.get(provider, provider.capitalize())
 
+        # Only carry base_url for providers that actually need it
+        effective_base_url = None
+        if provider in (AI_SERVICE_OLLAMA,):
+            effective_base_url = ollama_host or base_url
+        elif provider in (AI_SERVICE_OPENAI_COMPATIBLE,):
+            effective_base_url = base_url
+        # Standard OpenAI and Anthropic don't use base_url
+
         old_data[CONF_LLM_PROVIDERS] = [{
             "id": provider_id,
             "name": provider_name,
             "provider": provider,
             "api_key": api_key,
             "model": model or _DEFAULT_MODEL_FOR_PROVIDER.get(provider, ""),
-            "base_url": base_url or ollama_host,
+            "base_url": effective_base_url,
         }]
         old_data[CONF_ACTIVE_LLM_PROVIDER] = provider_id
 
