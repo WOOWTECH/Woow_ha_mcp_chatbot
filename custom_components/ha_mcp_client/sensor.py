@@ -20,12 +20,17 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=120)
 
 # Shared stats cache to avoid redundant file reads across sensors
+# TTL matches SCAN_INTERVAL so cache stays valid across entire poll cycles
 _stats_cache: dict[str, tuple[float, dict[str, Any]]] = {}
-_CACHE_TTL = 60  # seconds
+_CACHE_TTL = 120  # seconds — matches SCAN_INTERVAL
 
 
 async def _get_cached_stats(memory_store: Any, entry_id: str) -> dict[str, Any]:
-    """Get stats with caching to avoid redundant file reads."""
+    """Get stats with caching to avoid redundant file reads.
+
+    Uses a long cache TTL to avoid blocking the executor pool with file I/O.
+    Stats are informational only and don't need real-time accuracy.
+    """
     now = time.monotonic()
     cached = _stats_cache.get(entry_id)
     if cached and (now - cached[0]) < _CACHE_TTL:
@@ -34,7 +39,7 @@ async def _get_cached_stats(memory_store: Any, entry_id: str) -> dict[str, Any]:
     try:
         stats = await memory_store.get_stats()
     except Exception as e:
-        _LOGGER.warning("Failed to get memory stats: %s", e)
+        _LOGGER.debug("Failed to get memory stats: %s", e)
         if cached:
             return cached[1]
         return {}

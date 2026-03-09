@@ -160,10 +160,12 @@ class MemoryStore:
     async def write_long_term(self, content: str) -> None:
         """Overwrite MEMORY.md with new content."""
         await self.hass.async_add_executor_job(self._write_file, self._memory_file, content)
+        self._cached_stats = None  # Invalidate stats cache
 
     async def append_history(self, entry: str) -> None:
         """Append an entry to HISTORY.md."""
         await self.hass.async_add_executor_job(self._append_file, self._history_file, entry)
+        self._cached_stats = None  # Invalidate stats cache
 
     async def read_history(self) -> str:
         """Read HISTORY.md content."""
@@ -360,8 +362,23 @@ class MemoryStore:
 
     # ── Statistics ──
 
+    # Cached stats to avoid blocking executor on every sensor poll
+    _cached_stats: dict[str, Any] | None = None
+    _cached_stats_time: float = 0
+    _STATS_CACHE_TTL: float = 120  # seconds — matches sensor SCAN_INTERVAL
+
     async def get_stats(self) -> dict[str, Any]:
-        """Get memory statistics for sensor entities."""
+        """Get memory statistics for sensor entities.
+
+        Uses internal cache to avoid blocking the executor pool with file I/O
+        on every sensor update cycle.
+        """
+        import time as _time
+
+        now = _time.monotonic()
+        if self._cached_stats and (now - self._cached_stats_time) < self._STATS_CACHE_TTL:
+            return self._cached_stats
+
         memory = await self.read_long_term()
         history = await self.read_history()
 
@@ -372,7 +389,7 @@ class MemoryStore:
         # Count history entries (paragraphs starting with [YYYY-MM-DD])
         history_entries = len(re.findall(r"^\[20\d{2}-\d{2}-\d{2}", history, re.MULTILINE))
 
-        return {
+        stats = {
             "memory_entries": memory_entries,
             "history_entries": history_entries,
             "last_consolidation": (
@@ -383,6 +400,9 @@ class MemoryStore:
             "memory_file": str(self._memory_file),
             "history_file": str(self._history_file),
         }
+        self._cached_stats = stats
+        self._cached_stats_time = now
+        return stats
 
     # ── Sync file helpers ──
 

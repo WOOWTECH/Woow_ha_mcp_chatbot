@@ -1,7 +1,9 @@
 """Conversation Recorder for HA MCP Client."""
 
+import asyncio
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -70,6 +72,13 @@ class ConversationRecorder:
         )
         self._unsub_listener = None
         self._unsub_cleanup = None
+        # Dedicated thread pool to avoid contention with HA recorder's DbWorker pool
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="McpDb")
+
+    async def _run_in_executor(self, func):
+        """Run a sync function in our dedicated thread pool."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, func)
 
     async def async_setup(self) -> None:
         """Set up the conversation recorder."""
@@ -104,6 +113,8 @@ class ConversationRecorder:
         if self._unsub_cleanup:
             self._unsub_cleanup()
             self._unsub_cleanup = None
+
+        self._executor.shutdown(wait=False)
 
     async def _create_tables(self) -> None:
         """Create database tables."""
@@ -183,7 +194,7 @@ class ConversationRecorder:
                 _LOGGER.debug("Successfully committed conversation to database")
 
         try:
-            await recorder.async_add_executor_job(_record)
+            await self._run_in_executor(_record)
         except Exception as e:
             _LOGGER.error("Error recording conversation: %s", e, exc_info=True)
 
@@ -218,7 +229,7 @@ class ConversationRecorder:
                 ]
 
         try:
-            return await recorder.async_add_executor_job(_list)
+            return await self._run_in_executor(_list)
         except Exception as e:
             _LOGGER.error("Error listing conversations: %s", e)
             return []
@@ -246,7 +257,7 @@ class ConversationRecorder:
                 session.commit()
 
         try:
-            await recorder.async_add_executor_job(_create)
+            await self._run_in_executor(_create)
             return {
                 "id": conversation_id,
                 "title": title,
@@ -288,7 +299,7 @@ class ConversationRecorder:
                 return True
 
         try:
-            return await recorder.async_add_executor_job(_update)
+            return await self._run_in_executor(_update)
         except Exception as e:
             _LOGGER.error("Error updating conversation: %s", e)
             return False
@@ -312,7 +323,7 @@ class ConversationRecorder:
                     session.commit()
 
         try:
-            await recorder.async_add_executor_job(_touch)
+            await self._run_in_executor(_touch)
         except Exception as e:
             _LOGGER.error("Error touching conversation: %s", e)
 
@@ -345,7 +356,7 @@ class ConversationRecorder:
                 }
 
         try:
-            return await recorder.async_add_executor_job(_get)
+            return await self._run_in_executor(_get)
         except Exception as e:
             _LOGGER.error("Error getting conversation: %s", e)
             return None
@@ -399,7 +410,7 @@ class ConversationRecorder:
                 return results
 
         try:
-            return await recorder.async_add_executor_job(_get_msgs)
+            return await self._run_in_executor(_get_msgs)
         except Exception as e:
             _LOGGER.error("Error getting conversation messages: %s", e)
             return []
@@ -423,7 +434,7 @@ class ConversationRecorder:
                 return deleted
 
         try:
-            deleted = await recorder.async_add_executor_job(_cleanup)
+            deleted = await self._run_in_executor(_cleanup)
             if deleted:
                 _LOGGER.info("Cleaned up %d old conversation records", deleted)
         except Exception as e:
@@ -491,7 +502,7 @@ class ConversationRecorder:
                 return results
 
         try:
-            return await recorder.async_add_executor_job(_get_history)
+            return await self._run_in_executor(_get_history)
         except Exception as e:
             _LOGGER.error("Error getting conversation history: %s", e)
             return []
@@ -528,7 +539,7 @@ class ConversationRecorder:
                 return deleted
 
         try:
-            return await recorder.async_add_executor_job(_clear)
+            return await self._run_in_executor(_clear)
         except Exception as e:
             _LOGGER.error("Error clearing conversation history: %s", e)
             return 0

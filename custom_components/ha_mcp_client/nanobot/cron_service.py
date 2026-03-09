@@ -88,16 +88,18 @@ class CronService:
 
     async def _timer_loop(self, delay_s: float) -> None:
         """Sleep then execute overdue jobs."""
+        cancelled = False
         try:
             await asyncio.sleep(delay_s)
             if self._running:
                 await self._on_tick()
         except asyncio.CancelledError:
-            pass
+            cancelled = True
         except Exception:
             _LOGGER.exception("Cron timer loop error")
         finally:
-            if self._running:
+            # Only re-arm if still running AND not cancelled by _arm_timer replacement
+            if self._running and not cancelled:
                 self._arm_timer()
 
     def _compute_delay(self) -> int:
