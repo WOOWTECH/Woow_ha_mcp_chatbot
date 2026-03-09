@@ -205,7 +205,7 @@ class CronService:
             _LOGGER.warning("Could not trigger conversation for cron job: %s", e)
 
     async def _execute_system_event(self, job: CronJob) -> None:
-        """Fire a HA event."""
+        """Fire a HA event and send persistent notification."""
         self.hass.bus.async_fire(
             "ha_mcp_client_cron_system_event",
             {
@@ -214,6 +214,23 @@ class CronService:
                 "message": job.payload.message,
             },
         )
+
+        # Send persistent notification to HA sidebar
+        try:
+            await self.hass.services.async_call(
+                "notify",
+                "persistent_notification",
+                {
+                    "title": f"🕐 排程事件：{job.name}",
+                    "message": job.payload.message,
+                },
+                blocking=False,
+            )
+        except Exception as e:
+            _LOGGER.warning(
+                "Could not send persistent notification for cron job %s: %s",
+                job.id, e,
+            )
 
     # ── Next-run computation ──
 

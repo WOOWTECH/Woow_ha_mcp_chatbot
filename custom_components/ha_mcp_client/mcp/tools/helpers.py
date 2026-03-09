@@ -4053,13 +4053,22 @@ def _payload_to_action(hass: HomeAssistant, payload) -> list[dict[str, Any]]:
         }]
 
     elif payload.kind == "system_event":
-        return [{
-            "event": "ha_mcp_client_cron_system_event",
-            "event_data": {
-                "message": payload.message,
-                "source": "cron_bridge",
+        return [
+            {
+                "event": "ha_mcp_client_cron_system_event",
+                "event_data": {
+                    "message": payload.message,
+                    "source": "cron_bridge",
+                },
             },
-        }]
+            {
+                "service": "notify.persistent_notification",
+                "data": {
+                    "title": "🕐 排程事件",
+                    "message": payload.message,
+                },
+            },
+        ]
 
     raise ValueError(f"不支援的 payload 類型：{payload.kind}")
 
