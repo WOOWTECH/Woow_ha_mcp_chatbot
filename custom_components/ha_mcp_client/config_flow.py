@@ -66,6 +66,9 @@ ANTHROPIC_MODELS = [
 ]
 
 OPENAI_MODELS = [
+    "gpt-5.4",
+    "gpt-5.4-pro",
+    "gpt-5-mini",
     "gpt-4.1",
     "gpt-4.1-mini",
     "gpt-4.1-nano",
