@@ -28,7 +28,7 @@ class AnthropicService(AIServiceProvider):
         super().__init__(config)
         self._client = None
         self._api_key = config.get("api_key", "")
-        self._model = config.get("model", "claude-sonnet-4-20250514")
+        self._model = config.get("model", "claude-sonnet-4-6")
 
     @property
     def name(self) -> str:

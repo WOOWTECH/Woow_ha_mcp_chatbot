@@ -29,7 +29,7 @@ class OpenAIService(AIServiceProvider):
         super().__init__(config)
         self._client = None
         self._api_key = config.get("api_key", "")
-        self._model = config.get("model", "gpt-4-turbo")
+        self._model = config.get("model", "gpt-4.1")
         self._base_url = config.get("base_url")
 
     @property

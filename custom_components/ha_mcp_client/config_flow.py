@@ -57,29 +57,43 @@ _LOGGER = logging.getLogger(__name__)
 
 # Model options for each service
 ANTHROPIC_MODELS = [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-opus-4-5-20251101",
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-    "claude-3-opus-20240229",
+    "claude-haiku-4-20250514",
 ]
 
 OPENAI_MODELS = [
-    "gpt-4-turbo",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
     "gpt-4o",
     "gpt-4o-mini",
-    "gpt-4",
-    "gpt-3.5-turbo",
+    "o3",
+    "o3-mini",
+    "o4-mini",
+]
+
+GEMINI_MODELS = [
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite",
 ]
 
 OLLAMA_MODELS = [
+    "llama4:scout",
     "llama3.2",
     "llama3.1",
+    "qwen3",
+    "qwen3:30b",
+    "deepseek-r1",
     "mistral",
-    "mixtral",
-    "codellama",
-    "phi3",
     "gemma2",
+    "phi3",
 ]
 
 _DEFAULT_MODEL_FOR_PROVIDER = {
@@ -93,10 +107,10 @@ _MODELS_FOR_PROVIDER = {
     AI_SERVICE_ANTHROPIC: ANTHROPIC_MODELS,
     AI_SERVICE_OPENAI: OPENAI_MODELS,
     AI_SERVICE_OLLAMA: OLLAMA_MODELS,
-    AI_SERVICE_OPENAI_COMPATIBLE: OPENAI_MODELS,
+    AI_SERVICE_OPENAI_COMPATIBLE: GEMINI_MODELS + OPENAI_MODELS,
 }
 
-ALL_MODELS = ANTHROPIC_MODELS + OPENAI_MODELS + OLLAMA_MODELS
+ALL_MODELS = ANTHROPIC_MODELS + OPENAI_MODELS + GEMINI_MODELS + OLLAMA_MODELS
 
 _PROVIDER_LABELS = [
     {"value": AI_SERVICE_ANTHROPIC, "label": "Anthropic Claude"},
