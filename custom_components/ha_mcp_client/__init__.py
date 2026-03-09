@@ -46,6 +46,9 @@ from .views import (
     CronJobsListView,
     CronJobDetailView,
     CronJobTriggerView,
+    CronToAutomationView,
+    CronBlueprintsListView,
+    CronBlueprintsInstallView,
     SettingsView,
 )
 
@@ -130,6 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(CronJobsListView())
         hass.http.register_view(CronJobTriggerView())
         hass.http.register_view(CronJobDetailView())
+        hass.http.register_view(CronToAutomationView())
+        hass.http.register_view(CronBlueprintsListView())
+        hass.http.register_view(CronBlueprintsInstallView())
         hass.http.register_view(SettingsView())
 
         # Register static frontend path + sidebar panel

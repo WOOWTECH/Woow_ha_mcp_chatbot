@@ -726,6 +726,154 @@ class CronJobTriggerView(HomeAssistantView):
         return self.json({"success": True, "triggered": job_id})
 
 
+class CronToAutomationView(HomeAssistantView):
+    """View to convert a cron job to a native HA automation."""
+
+    url = f"/api/{DOMAIN}/cron/jobs/{{job_id}}/to_automation"
+    name = f"api:{DOMAIN}:cron_to_automation"
+    requires_auth = True
+
+    async def post(self, request: web.Request, job_id: str) -> web.Response:
+        """Convert a cron job to an HA automation."""
+        hass = request.app["hass"]
+        svc = _get_cron_service(hass)
+        if not svc:
+            return self.json_message("Cron service not available", status_code=503)
+
+        job = await svc.get_job(job_id)
+        if not job:
+            return self.json_message(f"Job '{job_id}' not found", status_code=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        alias = body.get("alias")
+        keep_cron_job = body.get("keep_cron_job", True)
+
+        from .mcp.tools.helpers import cron_to_automation
+        result = await cron_to_automation(
+            hass,
+            cron_job=job,
+            alias=alias,
+            keep_cron_job=keep_cron_job,
+        )
+
+        if not result.get("success"):
+            return self.json(result, status_code=400)
+
+        # Remove the original cron job if keep_cron_job is False
+        if not keep_cron_job:
+            await svc.remove_job(job_id)
+
+        return self.json(result, status_code=201)
+
+
+class CronBlueprintsListView(HomeAssistantView):
+    """View to list available cron blueprints."""
+
+    url = f"/api/{DOMAIN}/blueprints"
+    name = f"api:{DOMAIN}:cron_blueprints"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """List built-in cron blueprints."""
+        from pathlib import Path
+
+        bp_dir = Path(__file__).parent / "blueprints" / "automation"
+        if not bp_dir.exists():
+            return self.json({"blueprints": [], "count": 0})
+
+        import yaml
+
+        # Custom loader that handles HA-specific !input tags
+        class _BPLoader(yaml.SafeLoader):
+            pass
+
+        _BPLoader.add_constructor(
+            "!input",
+            lambda loader, node: f"__input__{loader.construct_scalar(node)}",
+        )
+
+        blueprints = []
+        for f in sorted(bp_dir.glob("*.yaml")):
+            try:
+                content = f.read_text(encoding="utf-8")
+                data = yaml.load(content, Loader=_BPLoader)  # noqa: S506
+                bp_meta = data.get("blueprint", {})
+                blueprints.append({
+                    "filename": f.name,
+                    "name": bp_meta.get("name", f.stem),
+                    "description": bp_meta.get("description", ""),
+                    "inputs": list(bp_meta.get("input", {}).keys()),
+                })
+            except Exception:
+                pass
+
+        return self.json({"blueprints": blueprints, "count": len(blueprints)})
+
+
+class CronBlueprintsInstallView(HomeAssistantView):
+    """View to install cron blueprints to HA."""
+
+    url = f"/api/{DOMAIN}/blueprints/install"
+    name = f"api:{DOMAIN}:cron_blueprints_install"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        """Install built-in cron blueprints to HA's blueprint directory."""
+        from pathlib import Path
+        import shutil
+
+        hass = request.app["hass"]
+        src_dir = Path(__file__).parent / "blueprints" / "automation"
+        if not src_dir.exists():
+            return self.json_message("No built-in blueprints found", status_code=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        blueprint_id = body.get("blueprint_id")
+
+        # Validate specific blueprint exists
+        if blueprint_id:
+            src_file = src_dir / blueprint_id
+            if not src_file.is_file():
+                return self.json_message(
+                    f"Blueprint '{blueprint_id}' not found", status_code=404
+                )
+
+        dest_dir = Path(hass.config.path("blueprints", "automation", "ha_mcp_client"))
+        installed = []
+        errors = []
+
+        def _do_install():
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            if blueprint_id:
+                files = [src_dir / blueprint_id]
+            else:
+                files = sorted(src_dir.glob("*.yaml"))
+            for f in files:
+                try:
+                    dest = dest_dir / f.name
+                    shutil.copy2(str(f), str(dest))
+                    installed.append(f.name)
+                except Exception as e:
+                    errors.append({"file": f.name, "error": str(e)})
+
+        await hass.async_add_executor_job(_do_install)
+
+        return self.json({
+            "success": len(errors) == 0,
+            "installed": installed,
+            "count": len(installed),
+            "errors": errors,
+        })
+
+
 def _get_config_entry(hass: HomeAssistant):
     """Get the first config entry and its data dict."""
     for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():

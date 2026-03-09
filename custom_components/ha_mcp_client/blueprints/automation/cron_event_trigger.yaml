@@ -1,0 +1,36 @@
+blueprint:
+  name: "定時事件觸發器"
+  description: >
+    在指定的排程時間觸發 ha_mcp_client_cron_system_event 事件，
+    其他 automation 可以監聽此事件作為觸發條件。
+    適合建立事件驅動的自動化鏈。
+  domain: automation
+  input:
+    trigger_time:
+      name: "觸發時間"
+      default: "00:00:00"
+      selector:
+        time:
+    event_message:
+      name: "事件訊息"
+      description: "附加在事件中的訊息內容"
+      default: "scheduled_trigger"
+      selector:
+        text:
+    event_name:
+      name: "事件名稱 (選填)"
+      description: "自訂事件名稱，預設使用 ha_mcp_client_cron_system_event"
+      default: "ha_mcp_client_cron_system_event"
+      selector:
+        text:
+
+trigger:
+  - platform: time
+    at: !input trigger_time
+
+action:
+  - event: !input event_name
+    event_data:
+      message: !input event_message
+      source: "blueprint_cron_event_trigger"
+      triggered_at: "{{ now().isoformat() }}"

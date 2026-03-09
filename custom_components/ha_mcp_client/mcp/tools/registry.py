@@ -65,6 +65,7 @@ from .helpers import (
     control_valve,
     control_number,
     control_shopping_list,
+    cron_to_automation,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -2412,6 +2413,85 @@ NEVER call create_scene without the 'entities' parameter!""",
             )
         )
 
+        # --- Cron-to-Automation Bridge tools ---
+        self.register(
+            ToolDefinition(
+                name="cron_to_automation",
+                description=(
+                    "Convert an existing cron job into a native Home Assistant automation. "
+                    "The automation will use conversation.process for agent_turn payloads "
+                    "or fire a custom event for system_event payloads."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The cron job ID to convert",
+                        },
+                        "alias": {
+                            "type": "string",
+                            "description": (
+                                "Optional friendly name for the automation. "
+                                "Defaults to the cron job name."
+                            ),
+                        },
+                        "keep_cron_job": {
+                            "type": "boolean",
+                            "description": (
+                                "Keep the original cron job after conversion. "
+                                "Defaults to true."
+                            ),
+                        },
+                    },
+                    "required": ["job_id"],
+                },
+                handler=self._handle_cron_to_automation,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="list_cron_blueprints",
+                description=(
+                    "List available cron blueprint templates that can be installed "
+                    "into Home Assistant for common scheduling patterns."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+                handler=self._handle_list_cron_blueprints,
+                category="cron",
+            )
+        )
+
+        self.register(
+            ToolDefinition(
+                name="install_cron_blueprints",
+                description=(
+                    "Install cron blueprint templates into Home Assistant's "
+                    "blueprints directory so they can be used to create automations."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "blueprint_id": {
+                            "type": "string",
+                            "description": (
+                                "Optional specific blueprint filename to install "
+                                "(e.g. 'ai_daily_report.yaml'). "
+                                "If omitted, all blueprints are installed."
+                            ),
+                        },
+                    },
+                },
+                handler=self._handle_install_cron_blueprints,
+                category="cron",
+            )
+        )
+
     def register(self, tool: ToolDefinition) -> None:
         """Register a tool."""
         # Cache handler signature at registration time to avoid
@@ -3885,3 +3965,113 @@ NEVER call create_scene without the 'entities' parameter!""",
         if not ok:
             return {"error": f"Job '{job_id}' not found"}
         return {"success": True, "triggered": job_id}
+
+    # --- Cron-to-Automation Bridge handlers ---
+
+    async def _handle_cron_to_automation(
+        self,
+        job_id: str,
+        alias: str | None = None,
+        keep_cron_job: bool = True,
+    ) -> dict[str, Any]:
+        """Handle cron_to_automation tool."""
+        svc = self._get_cron_service()
+        if not svc:
+            return {"error": "Cron service not available"}
+
+        job = await svc.get_job(job_id)
+        if not job:
+            return {"error": f"Job '{job_id}' not found"}
+
+        try:
+            result = await cron_to_automation(
+                self.hass, job, alias=alias, keep_cron_job=keep_cron_job
+            )
+            # Remove original cron job if keep_cron_job is False
+            if not keep_cron_job and result.get("success"):
+                await svc.remove_job(job_id)
+            return result
+        except ValueError as exc:
+            return {"error": str(exc)}
+        except Exception as exc:
+            _LOGGER.exception("Error converting cron job to automation")
+            return {"error": f"Conversion failed: {exc}"}
+
+    async def _handle_list_cron_blueprints(self) -> dict[str, Any]:
+        """Handle list_cron_blueprints tool."""
+        from pathlib import Path
+        import yaml
+
+        # Custom loader to handle HA-specific !input tags
+        class _BPLoader(yaml.SafeLoader):
+            pass
+
+        _BPLoader.add_constructor(
+            "!input",
+            lambda loader, node: f"__input__{loader.construct_scalar(node)}",
+        )
+
+        bp_dir = Path(__file__).parent.parent.parent / "blueprints" / "automation"
+        if not bp_dir.is_dir():
+            return {"blueprints": [], "count": 0}
+
+        blueprints = []
+        for bp_file in sorted(bp_dir.glob("*.yaml")):
+            try:
+                content = bp_file.read_text(encoding="utf-8")
+                data = yaml.load(content, Loader=_BPLoader)  # noqa: S506
+                bp_meta = data.get("blueprint", {})
+                blueprints.append({
+                    "id": bp_file.name,
+                    "name": bp_meta.get("name", bp_file.stem),
+                    "description": bp_meta.get("description", ""),
+                    "inputs": list((bp_meta.get("input") or {}).keys()),
+                })
+            except Exception as exc:
+                _LOGGER.warning("Failed to read blueprint %s: %s", bp_file.name, exc)
+
+        return {"blueprints": blueprints, "count": len(blueprints)}
+
+    async def _handle_install_cron_blueprints(
+        self, blueprint_id: str | None = None
+    ) -> dict[str, Any]:
+        """Handle install_cron_blueprints tool."""
+        from pathlib import Path
+        import shutil
+
+        bp_src = Path(__file__).parent.parent.parent / "blueprints" / "automation"
+        bp_dest = Path(self.hass.config.path(
+            "blueprints", "automation", "ha_mcp_client"
+        ))
+
+        if not bp_src.is_dir():
+            return {"error": "Blueprint source directory not found"}
+
+        bp_dest.mkdir(parents=True, exist_ok=True)
+
+        installed = []
+        if blueprint_id:
+            src_file = bp_src / blueprint_id
+            if not src_file.is_file():
+                return {"error": f"Blueprint '{blueprint_id}' not found"}
+            shutil.copy2(str(src_file), str(bp_dest / blueprint_id))
+            installed.append(blueprint_id)
+        else:
+            for bp_file in sorted(bp_src.glob("*.yaml")):
+                shutil.copy2(str(bp_file), str(bp_dest / bp_file.name))
+                installed.append(bp_file.name)
+
+        # Reload automations so HA picks up the new blueprints
+        try:
+            await self.hass.services.async_call(
+                "automation", "reload", blocking=True
+            )
+        except Exception:
+            _LOGGER.debug("Could not reload automations after blueprint install")
+
+        return {
+            "success": True,
+            "installed": installed,
+            "count": len(installed),
+            "path": str(bp_dest),
+        }

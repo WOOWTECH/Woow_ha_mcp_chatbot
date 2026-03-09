@@ -1,0 +1,35 @@
+blueprint:
+  name: "AI 排程裝置控制"
+  description: >
+    在指定時間讓 AI 助手執行裝置控制指令。AI 會理解語意並
+    呼叫適當的服務。適合需要條件判斷的排程控制。
+  domain: automation
+  input:
+    schedule_time:
+      name: "執行時間"
+      default: "22:00:00"
+      selector:
+        time:
+    control_prompt:
+      name: "控制指令"
+      description: "用自然語言描述要執行的操作"
+      default: "關閉所有燈光，除了臥室的夜燈"
+      selector:
+        text:
+          multiline: true
+    conversation_entity:
+      name: "AI 對話實體"
+      selector:
+        entity:
+          filter:
+            domain: conversation
+
+trigger:
+  - platform: time
+    at: !input schedule_time
+
+action:
+  - service: conversation.process
+    data:
+      text: !input control_prompt
+      agent_id: !input conversation_entity

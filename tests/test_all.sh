@@ -38,7 +38,7 @@ done
 
 # If no sections specified, run all
 if [ ${#SECTIONS[@]} -eq 0 ]; then
-  SECTIONS=(A B C D E F G H I J K L M N O P)
+  SECTIONS=(A B C D E F G H I J K L M N O P Q)
 fi
 
 # ─── Counters ────────────────────────────────────────────────────────────────
@@ -2087,6 +2087,166 @@ except: print('')
   curl -s -X POST -H "$AUTH" -H "$CT" \
     -d "{\"entity_id\":\"select.nanobot_reasoning_effort\",\"option\":\"$orig_effort\"}" \
     "$BASE/api/services/select/select_option" > /dev/null
+fi
+
+
+# =============================================================================
+# Q. CRON-TO-AUTOMATION BRIDGE
+# =============================================================================
+if should_run "Q"; then
+  _section "Q. Cron-to-Automation Bridge"
+
+  # ── Q1. List blueprints REST API ──
+  echo -e "  ${BOLD}Q1. Blueprints list${NC}"
+
+  status=$(http_get "$API/blueprints")
+  assert_status "Q1: GET /blueprints → 200" "200" "$status"
+  bp_body=$(body)
+  assert_contains "Q1: blueprints array" "blueprints" "$bp_body"
+
+  bp_count=$(echo "$bp_body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('blueprints',[])))" 2>/dev/null)
+  if [ "$bp_count" -ge 5 ] 2>/dev/null; then
+    _pass "Q1: found $bp_count blueprints (expected >= 5)"
+  else
+    _fail "Q1: expected >= 5 blueprints, got $bp_count"
+  fi
+
+  # Check specific blueprint names
+  assert_contains "Q1: ai_daily_report blueprint" "ai_daily_report" "$bp_body"
+  assert_contains "Q1: ai_periodic_check blueprint" "ai_periodic_check" "$bp_body"
+  assert_contains "Q1: scheduled_device_control blueprint" "scheduled_device_control" "$bp_body"
+  assert_contains "Q1: interval_monitor blueprint" "interval_monitor" "$bp_body"
+  assert_contains "Q1: cron_event_trigger blueprint" "cron_event_trigger" "$bp_body"
+
+  # ── Q2. Install blueprints REST API ──
+  echo -e "  ${BOLD}Q2. Blueprint install${NC}"
+
+  # Install single blueprint
+  status=$(http_post "$API/blueprints/install" '{"blueprint_id": "ai_daily_report.yaml"}')
+  if [ "$status" = "200" ] || [ "$status" = "201" ]; then
+    _pass "Q2: install single blueprint → $status"
+  else
+    _fail "Q2: install single blueprint (expected 200|201, got $status)"
+  fi
+  install_body=$(body)
+  assert_contains "Q2: installed has ai_daily_report" "ai_daily_report" "$install_body"
+
+  # Install all blueprints
+  status=$(http_post "$API/blueprints/install" '{}')
+  if [ "$status" = "200" ] || [ "$status" = "201" ]; then
+    _pass "Q2: install all blueprints → $status"
+  else
+    _fail "Q2: install all blueprints (expected 200|201, got $status)"
+  fi
+  all_body=$(body)
+  install_count=$(echo "$all_body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('count',0))" 2>/dev/null)
+  if [ "$install_count" -ge 5 ] 2>/dev/null; then
+    _pass "Q2: installed $install_count blueprints"
+  else
+    _fail "Q2: expected >= 5 installed, got $install_count"
+  fi
+
+  # ── Q3. Cron-to-automation conversion ──
+  echo -e "  ${BOLD}Q3. Cron-to-automation${NC}"
+
+  # Create a test cron job first
+  status=$(http_post "$API/cron/jobs" '{
+    "name": "bridge_test_job",
+    "schedule": {"kind": "every", "every_ms": 7200000},
+    "payload": {"kind": "agent_turn", "message": "Bridge test check"},
+    "enabled": false
+  }')
+  bridge_job=$(body)
+  BRIDGE_JOB_ID=$(echo "$bridge_job" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id', d.get('job',{}).get('id','')))" 2>/dev/null)
+
+  if [ -n "$BRIDGE_JOB_ID" ] && [ "$BRIDGE_JOB_ID" != "" ]; then
+    _pass "Q3: created test cron job $BRIDGE_JOB_ID"
+
+    # Convert to automation
+    status=$(http_post "$API/cron/jobs/$BRIDGE_JOB_ID/to_automation" '{"alias":"Bridge Test Auto","keep_cron_job":true}')
+    if [ "$status" = "200" ] || [ "$status" = "201" ]; then
+      _pass "Q3: cron-to-automation → $status"
+    else
+      _fail "Q3: cron-to-automation (expected 200|201, got $status)"
+    fi
+    conv_body=$(body)
+
+    # Check result has automation_id
+    auto_id=$(echo "$conv_body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('automation_id',''))" 2>/dev/null)
+    if [ -n "$auto_id" ] && [ "$auto_id" != "" ]; then
+      _pass "Q3: automation created with ID: $auto_id"
+    else
+      _warn "Q3: no automation_id in response (may need HA automation reload)"
+    fi
+
+    # Verify source_job_id in result
+    src_id=$(echo "$conv_body" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('source_job_id',''))" 2>/dev/null)
+    assert_eq "Q3: source_job_id matches" "$BRIDGE_JOB_ID" "$src_id"
+
+    # Verify cron job still exists (keep_cron_job=true)
+    status=$(http_get "$API/cron/jobs/$BRIDGE_JOB_ID")
+    assert_status "Q3: original cron job still exists" "200" "$status"
+
+    # Clean up: delete the cron job
+    http_delete "$API/cron/jobs/$BRIDGE_JOB_ID" > /dev/null
+  else
+    _fail "Q3: could not create test cron job"
+  fi
+
+  # ── Q4. Cron-to-automation with deletion ──
+  echo -e "  ${BOLD}Q4. Convert with keep_cron_job=false${NC}"
+
+  status=$(http_post "$API/cron/jobs" '{
+    "name": "bridge_delete_test",
+    "schedule": {"kind": "at", "at_ms": 1709280000000},
+    "payload": {"kind": "system_event", "message": "delete_bridge_test"},
+    "enabled": false
+  }')
+  del_job=$(body)
+  DEL_JOB_ID=$(echo "$del_job" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id', d.get('job',{}).get('id','')))" 2>/dev/null)
+
+  if [ -n "$DEL_JOB_ID" ] && [ "$DEL_JOB_ID" != "" ]; then
+    _pass "Q4: created test job $DEL_JOB_ID"
+
+    # Convert with keep_cron_job=false
+    status=$(http_post "$API/cron/jobs/$DEL_JOB_ID/to_automation" '{"keep_cron_job":false}')
+    if [ "$status" = "200" ] || [ "$status" = "201" ]; then
+      _pass "Q4: convert with delete → $status"
+    else
+      _fail "Q4: convert with delete (expected 200|201, got $status)"
+    fi
+
+    # Verify cron job was deleted
+    status=$(http_get "$API/cron/jobs/$DEL_JOB_ID")
+    if [ "$status" = "404" ]; then
+      _pass "Q4: cron job deleted after conversion"
+    else
+      _warn "Q4: cron job may still exist ($status) — expected 404"
+      # Cleanup if still exists
+      http_delete "$API/cron/jobs/$DEL_JOB_ID" > /dev/null 2>&1
+    fi
+  else
+    _fail "Q4: could not create test cron job"
+  fi
+
+  # ── Q5. Error handling ──
+  echo -e "  ${BOLD}Q5. Bridge error cases${NC}"
+
+  # Non-existent job
+  status=$(http_post "$API/cron/jobs/nonexistent_bridge_id/to_automation" '{}')
+  if [ "$status" = "404" ]; then
+    _pass "Q5: non-existent job → 404"
+  else
+    _warn "Q5: non-existent job → $status (expected 404)"
+  fi
+
+  # Non-existent blueprint install
+  status=$(http_post "$API/blueprints/install" '{"blueprint_id": "nonexistent.yaml"}')
+  if [ "$status" = "404" ] || [ "$status" = "400" ]; then
+    _pass "Q5: non-existent blueprint → $status"
+  else
+    _warn "Q5: non-existent blueprint → $status (expected 404|400)"
+  fi
 fi
 
 

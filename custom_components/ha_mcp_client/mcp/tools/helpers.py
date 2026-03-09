@@ -3970,3 +3970,150 @@ async def control_shopping_list(
             "error": "shopping_list_failed",
             "message": f"購物清單操作失敗：{str(e)}",
         }
+
+
+# ── Cron-to-Automation Bridge ─────────────────────────────────────────────────
+
+
+def _schedule_to_trigger(schedule) -> list[dict[str, Any]]:
+    """Convert a CronSchedule to HA automation trigger list.
+
+    Mapping:
+      at (Unix ms)   -> platform: time, at: "HH:MM:SS"
+      every (ms)     -> platform: time_pattern, hours|minutes|seconds: "/N"
+      cron (expr)    -> platform: time_pattern, parsing minute/hour fields
+    """
+    if schedule.kind == "at":
+        if not schedule.at_ms:
+            return [{"platform": "time_pattern", "minutes": "/30"}]
+        dt = datetime.fromtimestamp(schedule.at_ms / 1000, tz=timezone.utc)
+        local_dt = dt.astimezone()
+        return [{"platform": "time", "at": local_dt.strftime("%H:%M:%S")}]
+
+    elif schedule.kind == "every":
+        every_ms = schedule.every_ms or 0
+        if every_ms <= 0:
+            return [{"platform": "time_pattern", "minutes": "/30"}]
+        total_seconds = every_ms // 1000
+        if total_seconds >= 3600:
+            hours = total_seconds // 3600
+            return [{"platform": "time_pattern", "hours": f"/{hours}"}]
+        elif total_seconds >= 60:
+            minutes = total_seconds // 60
+            return [{"platform": "time_pattern", "minutes": f"/{minutes}"}]
+        else:
+            seconds = max(total_seconds, 1)
+            return [{"platform": "time_pattern", "seconds": f"/{seconds}"}]
+
+    elif schedule.kind == "cron":
+        parts = (schedule.cron or "* * * * *").split()
+        if len(parts) < 2:
+            return [{"platform": "time_pattern", "minutes": "/30"}]
+        trigger: dict[str, Any] = {"platform": "time_pattern"}
+        if parts[0] != "*":
+            trigger["minutes"] = parts[0]
+        if parts[1] != "*":
+            trigger["hours"] = parts[1]
+        return [trigger]
+
+    return [{"platform": "time_pattern", "minutes": "/30"}]
+
+
+def _payload_to_action(hass: HomeAssistant, payload) -> list[dict[str, Any]]:
+    """Convert a CronPayload to HA automation action list.
+
+    Mapping:
+      agent_turn   -> service: conversation.process
+      system_event -> event: ha_mcp_client_cron_system_event
+    """
+    from ...const import DOMAIN
+
+    if payload.kind == "agent_turn":
+        if not payload.message:
+            raise ValueError("agent_turn payload 需要非空的 message")
+
+        # Find conversation entity
+        agent_id = None
+        for state in hass.states.async_all("conversation"):
+            if DOMAIN in state.entity_id:
+                agent_id = state.entity_id
+                break
+
+        if not agent_id:
+            raise ValueError(
+                "找不到 HA MCP Client 對話實體，請確認整合已啟用 conversation"
+            )
+
+        return [{
+            "service": "conversation.process",
+            "data": {
+                "text": payload.message,
+                "agent_id": agent_id,
+            },
+        }]
+
+    elif payload.kind == "system_event":
+        return [{
+            "event": "ha_mcp_client_cron_system_event",
+            "event_data": {
+                "message": payload.message,
+                "source": "cron_bridge",
+            },
+        }]
+
+    raise ValueError(f"不支援的 payload 類型：{payload.kind}")
+
+
+async def cron_to_automation(
+    hass: HomeAssistant,
+    cron_job,
+    alias: str | None = None,
+    keep_cron_job: bool = True,
+) -> dict[str, Any]:
+    """Convert a CronJob to a native HA automation.
+
+    Uses the existing create_automation() helper to write to automations.yaml.
+    """
+    try:
+        trigger = _schedule_to_trigger(cron_job.schedule)
+        action = _payload_to_action(hass, cron_job.payload)
+
+        automation_alias = alias or f"Cron: {cron_job.name}"
+        description = (
+            f"由 cron job [{cron_job.id}] '{cron_job.name}' 自動產生。"
+            f"排程：{cron_job.schedule.kind}，動作：{cron_job.payload.kind}"
+        )
+
+        result = await create_automation(
+            hass,
+            alias=automation_alias,
+            trigger=trigger,
+            action=action,
+            description=description,
+        )
+
+        if not result.get("success"):
+            return result
+
+        # Note: caller is responsible for removing the cron job if keep_cron_job is False
+
+        # Enrich response
+        result["source_job_id"] = cron_job.id
+        result["trigger"] = trigger
+        result["action"] = action
+
+        return result
+
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": "conversion_failed",
+            "message": str(e),
+        }
+    except Exception as e:
+        _LOGGER.error("Error converting cron job to automation: %s", e)
+        return {
+            "success": False,
+            "error": "conversion_failed",
+            "message": f"轉換失敗：{str(e)}",
+        }
