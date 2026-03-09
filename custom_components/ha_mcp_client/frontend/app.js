@@ -212,6 +212,10 @@
     try {
       conversations = await api("GET", "/conversations");
       renderConversationList();
+      // Re-select previous conversation so messages stay visible
+      if (currentConvId && conversations.find((c) => c.id === currentConvId)) {
+        selectConversation(currentConvId);
+      }
     } catch (e) {
       showToast("載入對話列表失敗: " + e.message, true);
     }

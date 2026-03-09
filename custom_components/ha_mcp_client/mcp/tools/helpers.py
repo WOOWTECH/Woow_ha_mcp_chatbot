@@ -1934,7 +1934,9 @@ async def delete_scene(
                 "message": f"找不到情境: {entity_id}",
             }
 
-        scene_id = entity_id.replace("scene.", "", 1)
+        # HA exposes the YAML 'id' field as an entity attribute
+        yaml_id = state.attributes.get("id", "")
+        scene_slug = entity_id.replace("scene.", "", 1)
         scene_name = state.attributes.get("friendly_name", entity_id)
 
         config_path = hass.config.path("scenes.yaml")
@@ -1951,13 +1953,14 @@ async def delete_scene(
 
             original_len = len(scenes)
 
-            # Remove matching scene
+            # Remove matching scene by YAML id, or by name-derived slug
             import re
             scenes = [
                 s for s in scenes
                 if not (
-                    s.get("id", "") == scene_id
-                    or re.sub(r'[^a-z0-9_]', '', s.get("name", "").lower().replace(" ", "_").replace("-", "_")) == scene_id
+                    (yaml_id and s.get("id", "") == yaml_id)
+                    or s.get("id", "") == scene_slug
+                    or re.sub(r'[^a-z0-9_]', '', s.get("name", "").lower().replace(" ", "_").replace("-", "_")) == scene_slug
                 )
             ]
 
@@ -2017,8 +2020,9 @@ async def bulk_delete_scenes(
     deleted = []
     failed = []
 
-    # Validate all entities and collect slugs
+    # Validate all entities and collect slugs + YAML ids
     slug_map: dict[str, str] = {}  # slug -> entity_id
+    yaml_id_map: dict[str, str] = {}  # yaml_id -> entity_id
     name_map: dict[str, str] = {}  # entity_id -> friendly_name
     for eid in entity_ids:
         state = hass.states.get(eid)
@@ -2027,6 +2031,9 @@ async def bulk_delete_scenes(
         else:
             slug = eid.replace("scene.", "", 1)
             slug_map[slug] = eid
+            yaml_id = state.attributes.get("id", "")
+            if yaml_id:
+                yaml_id_map[yaml_id] = eid
             name_map[eid] = state.attributes.get("friendly_name", eid)
 
     if not slug_map:
@@ -2057,7 +2064,9 @@ async def bulk_delete_scenes(
                 r'[^a-z0-9_]', '',
                 s.get("name", "").lower().replace(" ", "_").replace("-", "_"),
             )
-            if sid in slug_map:
+            if sid in yaml_id_map:
+                matched.append(yaml_id_map[sid])
+            elif sid in slug_map:
                 matched.append(slug_map[sid])
             elif normalized in slug_map:
                 matched.append(slug_map[normalized])
@@ -2659,8 +2668,8 @@ async def delete_automation(
             }
 
         automation_name = state.attributes.get("friendly_name", entity_id)
-        # Extract automation_id: the id field in automations.yaml
-        # HA stores it in the entity's unique_id or we can match by alias
+        # HA exposes the YAML 'id' field as an entity attribute
+        yaml_id = state.attributes.get("id", "")
         automation_slug = entity_id.replace("automation.", "", 1)
 
         config_path = hass.config.path("automations.yaml")
@@ -2677,12 +2686,13 @@ async def delete_automation(
 
             original_len = len(automations)
 
-            # Match by id field or by alias-derived slug
+            # Match by YAML id attribute (primary), or by alias-derived slug
             import re
             automations = [
                 a for a in automations
                 if not (
-                    a.get("id", "") == automation_slug
+                    (yaml_id and a.get("id", "") == yaml_id)
+                    or a.get("id", "") == automation_slug
                     or re.sub(r'[^a-z0-9_]', '', a.get("alias", "").lower().replace(" ", "_").replace("-", "_")) == automation_slug
                 )
             ]
@@ -2742,8 +2752,9 @@ async def bulk_delete_automations(
     deleted = []
     failed = []
 
-    # Validate all entities and collect slugs
+    # Validate all entities and collect slugs + YAML ids
     slug_map: dict[str, str] = {}
+    yaml_id_map: dict[str, str] = {}  # yaml_id -> entity_id
     name_map: dict[str, str] = {}
     for eid in entity_ids:
         state = hass.states.get(eid)
@@ -2752,6 +2763,9 @@ async def bulk_delete_automations(
         else:
             slug = eid.replace("automation.", "", 1)
             slug_map[slug] = eid
+            yaml_id = state.attributes.get("id", "")
+            if yaml_id:
+                yaml_id_map[yaml_id] = eid
             name_map[eid] = state.attributes.get("friendly_name", eid)
 
     if not slug_map:
@@ -2782,7 +2796,9 @@ async def bulk_delete_automations(
                 r'[^a-z0-9_]', '',
                 a.get("alias", "").lower().replace(" ", "_").replace("-", "_"),
             )
-            if aid in slug_map:
+            if aid in yaml_id_map:
+                matched.append(yaml_id_map[aid])
+            elif aid in slug_map:
                 matched.append(slug_map[aid])
             elif normalized in slug_map:
                 matched.append(slug_map[normalized])
