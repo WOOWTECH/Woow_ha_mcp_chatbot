@@ -253,7 +253,9 @@ class HAMCPConversationEntity(ConversationEntity):
             # Try to load history from recorder if enabled
             history_enabled = self._config_entry.data.get(CONF_ENABLE_CONVERSATION_HISTORY, True)
             if history_enabled and user_id:
-                loaded_messages = await self._load_history_from_recorder(user_id)
+                loaded_messages = await self._load_history_from_recorder(
+                    user_id, conversation_id=conversation_id
+                )
                 self._conversation_history[conversation_id] = loaded_messages
             else:
                 self._conversation_history[conversation_id] = []
@@ -534,13 +536,16 @@ class HAMCPConversationEntity(ConversationEntity):
         except Exception as e:
             _LOGGER.warning("Failed to sync input_text: %s", e)
 
-    async def _load_history_from_recorder(self, user_id: str) -> list[Message]:
-        """Load conversation history from recorder for a user."""
+    async def _load_history_from_recorder(
+        self, user_id: str, conversation_id: str | None = None
+    ) -> list[Message]:
+        """Load conversation history from recorder for a specific conversation."""
         try:
             # Get recorder instance
             _LOGGER.debug(
-                "Loading history for user %s, entry_id=%s",
+                "Loading history for user %s, conversation_id=%s, entry_id=%s",
                 user_id,
+                conversation_id,
                 self._config_entry.entry_id,
             )
             _LOGGER.debug("hass.data[DOMAIN] keys: %s", list(self.hass.data.get(DOMAIN, {}).keys()))
@@ -555,8 +560,10 @@ class HAMCPConversationEntity(ConversationEntity):
                 return []
 
             # Get recent history (last 20 messages to avoid context overflow)
+            # Filter by conversation_id when available to avoid cross-conversation contamination
             history_records = await recorder.get_conversation_history(
                 user_id=user_id,
+                conversation_id=conversation_id,
                 limit=20,
             )
 
