@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_LLM_PROVIDERS, CONF_ACTIVE_LLM_PROVIDER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,6 +79,11 @@ async def async_setup_entry(
         for job_id, job in cron_service._jobs.items():
             entities.append(NanobotCronJobNextRunSensor(entry, cron_service, job))
             entities.append(NanobotCronJobLastStatusSensor(entry, cron_service, job))
+
+    # Per-provider LLM sensors
+    providers = entry.data.get(CONF_LLM_PROVIDERS, [])
+    for provider_conf in providers:
+        entities.append(LLMProviderSensor(entry, provider_conf))
 
     if entities:
         async_add_entities(entities, update_before_add=False)
@@ -283,3 +288,45 @@ class NanobotCronJobLastStatusSensor(_NanobotBaseSensor):
         if job.state.last_error:
             attrs["last_error"] = job.state.last_error
         return attrs
+
+
+class LLMProviderSensor(_NanobotBaseSensor):
+    """Sensor showing the status of a configured LLM provider."""
+
+    _attr_icon = "mdi:robot"
+
+    def __init__(self, entry: ConfigEntry, provider_conf: dict[str, Any]) -> None:
+        self._entry = entry
+        self._provider_id = provider_conf.get("id", "unknown")
+        self._provider_conf = provider_conf
+        self._attr_unique_id = f"{entry.entry_id}_llm_{self._provider_id}"
+        self._attr_name = f"LLM: {provider_conf.get('name', self._provider_id)}"
+
+    @property
+    def native_value(self) -> str:
+        """Return connected if API key is present (or Ollama), else unconfigured."""
+        provider_type = self._provider_conf.get("provider", "")
+        api_key = self._provider_conf.get("api_key", "")
+        if provider_type == "ollama":
+            return "connected"
+        return "connected" if api_key else "unconfigured"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        key = self._provider_conf.get("api_key", "")
+        if key and len(key) > 6:
+            masked = f"{key[:3]}***{key[-3:]}"
+        elif key:
+            masked = "***"
+        else:
+            masked = None
+
+        active_id = self._entry.data.get(CONF_ACTIVE_LLM_PROVIDER, "")
+        return {
+            "provider": self._provider_conf.get("provider"),
+            "name": self._provider_conf.get("name"),
+            "model": self._provider_conf.get("model"),
+            "api_key_masked": masked,
+            "base_url": self._provider_conf.get("base_url"),
+            "is_active": self._provider_id == active_id,
+        }

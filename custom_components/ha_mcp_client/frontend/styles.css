@@ -374,6 +374,28 @@ html, body {
   flex-shrink: 0;
 }
 
+.model-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.model-selector select {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--divider-color);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--primary-text-color);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.model-selector select:focus {
+  border-color: var(--primary-color);
+}
+
 .input-wrapper {
   display: flex;
   align-items: flex-end;

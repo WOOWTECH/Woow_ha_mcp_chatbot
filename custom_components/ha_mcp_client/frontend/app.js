@@ -1071,6 +1071,94 @@
   }
 
   // ══════════════════════════════════════════════════════════
+  //  LLM PROVIDER/MODEL SELECTOR
+  // ══════════════════════════════════════════════════════════
+
+  let llmProviders = [];
+  let activeProviderId = "";
+
+  async function loadLLMProviders() {
+    try {
+      var data = await api("GET", "/llm_providers");
+      llmProviders = data.providers || [];
+      activeProviderId = data.active || "";
+      renderProviderSelector();
+    } catch (e) {
+      console.warn("Failed to load LLM providers:", e);
+    }
+  }
+
+  function renderProviderSelector() {
+    var providerSel = $("#provider-select");
+    var modelSel = $("#model-select");
+    if (!providerSel || !modelSel) return;
+
+    // Build provider options
+    providerSel.innerHTML = "";
+    llmProviders.forEach(function (p) {
+      var opt = document.createElement("option");
+      opt.value = p.id;
+      var statusDot = p.status === "connected" ? "🟢" : "🔴";
+      opt.textContent = statusDot + " " + p.name;
+      if (p.id === activeProviderId) opt.selected = true;
+      providerSel.appendChild(opt);
+    });
+
+    // Update model dropdown for active provider
+    updateModelDropdown();
+  }
+
+  function updateModelDropdown() {
+    var modelSel = $("#model-select");
+    if (!modelSel) return;
+
+    var activeP = llmProviders.find(function (p) { return p.id === activeProviderId; });
+    if (!activeP) return;
+
+    modelSel.innerHTML = "";
+    var models = activeP.models || [activeP.model];
+    models.forEach(function (m) {
+      var opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      if (m === activeP.model) opt.selected = true;
+      modelSel.appendChild(opt);
+    });
+  }
+
+  function initLLMSelector() {
+    var providerSel = $("#provider-select");
+    var modelSel = $("#model-select");
+    if (!providerSel || !modelSel) return;
+
+    providerSel.addEventListener("change", async function () {
+      var newId = providerSel.value;
+      if (newId === activeProviderId) return;
+      try {
+        await api("PATCH", "/active_llm", { provider_id: newId });
+        activeProviderId = newId;
+        updateModelDropdown();
+        showToast("已切換到 " + (llmProviders.find(function(p){return p.id===newId;}) || {}).name);
+      } catch (e) {
+        showToast("切換失敗: " + e.message, true);
+      }
+    });
+
+    modelSel.addEventListener("change", async function () {
+      var newModel = modelSel.value;
+      try {
+        await api("PATCH", "/active_llm", { provider_id: activeProviderId, model: newModel });
+        // Update local state
+        var p = llmProviders.find(function(p){return p.id===activeProviderId;});
+        if (p) p.model = newModel;
+        showToast("模型切換到 " + newModel);
+      } catch (e) {
+        showToast("模型切換失敗: " + e.message, true);
+      }
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════
   //  INIT
   // ══════════════════════════════════════════════════════════
 
@@ -1137,6 +1225,9 @@
     // ── Settings bindings ───────────────────────────────────
     initSettings();
 
+    // ── LLM Selector bindings ────────────────────────────────
+    initLLMSelector();
+
     // ── Auth: retry getting HA token (parent may load late) ─
     if (!AUTH_TOKEN) {
       var retries = 0;
@@ -1154,11 +1245,13 @@
             }
           }
           loadConversations();
+          loadLLMProviders();
         }
       }, 250);
     } else {
       // ── Initial load (chat is the default active tab) ─────
       loadConversations();
+      loadLLMProviders();
     }
   }
 

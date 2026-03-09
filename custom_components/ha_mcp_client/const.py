@@ -18,6 +18,10 @@ CONF_HISTORY_RETENTION_DAYS: Final = "history_retention_days"
 CONF_SYSTEM_PROMPT: Final = "system_prompt"
 CONF_MAX_TOOL_CALLS: Final = "max_tool_calls"
 
+# Multi-LLM Provider Config Keys
+CONF_LLM_PROVIDERS: Final = "llm_providers"
+CONF_ACTIVE_LLM_PROVIDER: Final = "active_llm_provider"
+
 # AI Service Types
 AI_SERVICE_ANTHROPIC: Final = "anthropic"
 AI_SERVICE_OPENAI: Final = "openai"

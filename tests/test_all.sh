@@ -342,18 +342,17 @@ if should_run "A"; then
     -d '{"entity_id":"select.nanobot_reasoning_effort","option":"medium"}' \
     "$BASE/api/services/select/select_option" > /dev/null
 
-  # Model select
-  model=$(ha_template "{{ states('select.nanobot_ai_model') }}")
-  assert_not_empty "AI model has value" "$model"
+  # Active LLM Provider select (replaces old nanobot_ai_provider + nanobot_ai_model)
+  provider=$(ha_template "{{ states('select.active_llm_provider') }}")
+  assert_not_empty "Active LLM provider has value" "$provider"
 
-  # Provider select
-  provider=$(ha_template "{{ states('select.nanobot_ai_provider') }}")
-  assert_not_empty "AI provider has value" "$provider"
+  # Provider options (now lists provider IDs like openai_1, ollama_1 etc.)
+  options=$(ha_template "{{ state_attr('select.active_llm_provider', 'options') }}")
+  assert_contains "Provider options include at least one provider" "_" "$options"
 
-  # Provider options
-  options=$(ha_template "{{ state_attr('select.nanobot_ai_provider', 'options') }}")
-  assert_contains "Provider options include openai" "openai" "$options"
-  assert_contains "Provider options include anthropic" "anthropic" "$options"
+  # Provider attributes include model info
+  model=$(ha_template "{{ state_attr('select.active_llm_provider', 'model') }}")
+  assert_not_empty "Active LLM has model attribute" "$model"
 
   # ── A4. Switch entities ──
   echo -e "  ${BOLD}A4. Switches${NC}"

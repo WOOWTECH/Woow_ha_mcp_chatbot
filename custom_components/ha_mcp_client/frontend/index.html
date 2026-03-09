@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>AI 助手</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
 </head>
 <body>
@@ -77,6 +77,10 @@
           </div>
 
           <div id="input-area" class="input-area" style="display:none">
+            <div id="model-selector" class="model-selector">
+              <select id="provider-select" title="選擇 LLM 提供者"></select>
+              <select id="model-select" title="選擇模型"></select>
+            </div>
             <div class="input-wrapper">
               <textarea id="message-input" placeholder="輸入訊息... (Enter 送出, Shift+Enter 換行)" rows="1"></textarea>
               <button id="send-btn" class="btn-send" title="送出" disabled>
@@ -273,6 +277,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

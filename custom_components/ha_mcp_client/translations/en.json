@@ -18,7 +18,7 @@
       },
       "ai_service": {
         "title": "AI Service Configuration",
-        "description": "Select and configure your AI service provider",
+        "description": "Select and configure your first AI service provider",
         "data": {
           "ai_service": "AI Service Provider",
           "api_key": "API Key",
@@ -43,7 +43,7 @@
       "connection_failed": "Failed to connect to the AI service.",
       "invalid_port": "Invalid port number. Must be between 1024 and 65535.",
       "ollama_not_reachable": "Cannot reach Ollama server at the specified host.",
-      "no_features_selected": "Please enable at least one feature (MCP Server or Conversation)."
+      "no_features_selected": "Please enable at least one feature."
     },
     "abort": {
       "already_configured": "HA MCP Client is already configured."
@@ -53,20 +53,40 @@
     "step": {
       "init": {
         "title": "HA MCP Client Settings",
-        "description": "Current configuration:\n- **AI Provider**: {current_ai}\n- **Model**: {current_model}\n\nSelect a category below to modify settings:",
+        "description": "Select a category below to modify settings:",
         "data": {
           "menu_option": "Configuration Category"
         }
       },
-      "ai_service": {
-        "title": "AI Service Configuration",
-        "description": "Configure your AI service provider and model",
+      "manage_llm": {
+        "title": "Manage LLM Providers",
+        "description": "Select a provider to edit, or add a new one",
         "data": {
-          "ai_service": "AI Service Provider",
+          "provider_action": "LLM Provider"
+        }
+      },
+      "add_llm": {
+        "title": "Add LLM Provider",
+        "description": "Configure a new LLM provider",
+        "data": {
+          "name": "Display Name",
+          "provider": "Provider Type",
           "api_key": "API Key",
           "model": "Model",
-          "base_url": "Base URL (for OpenAI compatible)",
-          "ollama_host": "Ollama Host URL"
+          "base_url": "Base URL (for Ollama / OpenAI Compatible)"
+        }
+      },
+      "edit_llm": {
+        "title": "Edit LLM Provider",
+        "description": "Editing: {provider_name}\nAPI Key: {api_key_masked}\nActive: {is_active}",
+        "data": {
+          "name": "Display Name",
+          "provider": "Provider Type",
+          "api_key": "API Key (leave empty to keep current)",
+          "model": "Model",
+          "base_url": "Base URL",
+          "set_active": "Set as active provider",
+          "delete_provider": "Delete this provider"
         }
       },
       "conversation_settings": {

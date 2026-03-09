@@ -19,6 +19,8 @@ from .const import (
     DOMAIN,
     CONF_ENABLE_MCP_SERVER,
     CONF_ENABLE_CONVERSATION,
+    CONF_LLM_PROVIDERS,
+    CONF_ACTIVE_LLM_PROVIDER,
     SERVICE_CLEAR_HISTORY,
     SERVICE_EXPORT_HISTORY,
     ATTR_USER_ID,
@@ -29,6 +31,7 @@ from .const import (
     INPUT_TEXT_AI,
     NANOBOT_DIR_NAME,
 )
+from .config_flow import async_migrate_entry  # noqa: F401 — HA discovers this
 from .mcp.server import MCPServer
 from .mcp.tools import ToolRegistry
 from .conversation_recorder import ConversationRecorder
@@ -49,6 +52,8 @@ from .views import (
     CronToAutomationView,
     CronBlueprintsListView,
     CronBlueprintsInstallView,
+    LLMProvidersView,
+    ActiveLLMView,
     SettingsView,
 )
 
@@ -86,6 +91,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     cron_service = CronService(hass, nanobot_dir / "cron")
     await cron_service.async_setup()
 
+    # Initialize runtime_settings from active LLM provider
+    runtime_settings: dict[str, Any] = {}
+    providers = entry.data.get(CONF_LLM_PROVIDERS, [])
+    active_id = entry.data.get(CONF_ACTIVE_LLM_PROVIDER, "")
+    active_provider = None
+    for p in providers:
+        if p.get("id") == active_id:
+            active_provider = p
+            break
+    if not active_provider and providers:
+        active_provider = providers[0]
+    if active_provider:
+        runtime_settings["ai_service"] = active_provider.get("provider", "openai")
+        runtime_settings["model"] = active_provider.get("model", "")
+        runtime_settings["api_key"] = active_provider.get("api_key", "")
+        runtime_settings["base_url"] = active_provider.get("base_url")
+
     # Store data for this entry
     data: dict[str, Any] = {
         "tool_registry": tool_registry,
@@ -94,6 +116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "cron_service": cron_service,
         "enable_mcp_server": entry.data.get(CONF_ENABLE_MCP_SERVER, True),
         "enable_conversation": entry.data.get(CONF_ENABLE_CONVERSATION, True),
+        "runtime_settings": runtime_settings,
     }
 
     try:
@@ -136,6 +159,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(CronToAutomationView())
         hass.http.register_view(CronBlueprintsListView())
         hass.http.register_view(CronBlueprintsInstallView())
+        hass.http.register_view(LLMProvidersView())
+        hass.http.register_view(ActiveLLMView())
         hass.http.register_view(SettingsView())
 
         # Register static frontend path + sidebar panel

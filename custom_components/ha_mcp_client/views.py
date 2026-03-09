@@ -884,6 +884,151 @@ def _get_config_entry(hass: HomeAssistant):
     return None, None
 
 
+class LLMProvidersView(HomeAssistantView):
+    """View to list all configured LLM providers."""
+
+    url = f"/api/{DOMAIN}/llm_providers"
+    name = f"api:{DOMAIN}:llm_providers"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """List all LLM providers (without full API keys)."""
+        from .const import CONF_LLM_PROVIDERS, CONF_ACTIVE_LLM_PROVIDER
+        from .config_flow import _MODELS_FOR_PROVIDER
+
+        hass = request.app["hass"]
+        entry, data = _get_config_entry(hass)
+        if not entry:
+            return self.json_message("No config entry found", status_code=503)
+
+        providers_raw = entry.data.get(CONF_LLM_PROVIDERS, [])
+        active = entry.data.get(CONF_ACTIVE_LLM_PROVIDER, "")
+
+        providers = []
+        for p in providers_raw:
+            key = p.get("api_key", "")
+            if key and len(key) > 6:
+                masked = f"{key[:3]}***{key[-3:]}"
+            elif key:
+                masked = "***"
+            else:
+                masked = None
+
+            provider_type = p.get("provider", "openai")
+            models = list(_MODELS_FOR_PROVIDER.get(provider_type, []))
+            # Include current model if not in default list
+            current_model = p.get("model", "")
+            if current_model and current_model not in models:
+                models.insert(0, current_model)
+
+            providers.append({
+                "id": p.get("id"),
+                "name": p.get("name"),
+                "provider": provider_type,
+                "model": current_model,
+                "api_key_masked": masked,
+                "base_url": p.get("base_url"),
+                "status": "connected" if (key or provider_type == "ollama") else "unconfigured",
+                "models": models,
+            })
+
+        return self.json({"providers": providers, "active": active})
+
+
+class ActiveLLMView(HomeAssistantView):
+    """View to switch active LLM provider and/or model."""
+
+    url = f"/api/{DOMAIN}/active_llm"
+    name = f"api:{DOMAIN}:active_llm"
+    requires_auth = True
+
+    async def patch(self, request: web.Request) -> web.Response:
+        """Switch the active LLM provider."""
+        from .const import CONF_LLM_PROVIDERS, CONF_ACTIVE_LLM_PROVIDER
+
+        hass = request.app["hass"]
+        entry, data = _get_config_entry(hass)
+        if not entry:
+            return self.json_message("No config entry found", status_code=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return self.json_message("Invalid JSON", status_code=400)
+
+        provider_id = body.get("provider_id", "")
+        new_model = body.get("model", "")
+
+        if not provider_id:
+            return self.json_message("provider_id is required", status_code=400)
+
+        providers = entry.data.get(CONF_LLM_PROVIDERS, [])
+        target = None
+        for p in providers:
+            if p["id"] == provider_id:
+                target = p
+                break
+
+        if not target:
+            return self.json_message(
+                f"Provider '{provider_id}' not found", status_code=404
+            )
+
+        # Optionally update the model for this provider
+        if new_model:
+            new_data = dict(entry.data)
+            new_providers = []
+            for p in providers:
+                if p["id"] == provider_id:
+                    updated = dict(p)
+                    updated["model"] = new_model
+                    new_providers.append(updated)
+                    target = updated
+                else:
+                    new_providers.append(p)
+            new_data[CONF_LLM_PROVIDERS] = new_providers
+            new_data[CONF_ACTIVE_LLM_PROVIDER] = provider_id
+            if data:
+                data["_skip_reload"] = True
+            hass.config_entries.async_update_entry(entry, data=new_data)
+        else:
+            new_data = dict(entry.data)
+            new_data[CONF_ACTIVE_LLM_PROVIDER] = provider_id
+            if data:
+                data["_skip_reload"] = True
+            hass.config_entries.async_update_entry(entry, data=new_data)
+
+        # Update runtime_settings
+        if data:
+            rt = data.setdefault("runtime_settings", {})
+            rt["ai_service"] = target.get("provider", "openai")
+            rt["model"] = target.get("model", "")
+            rt["api_key"] = target.get("api_key", "")
+            rt["base_url"] = target.get("base_url")
+
+        # Notify select entity to refresh its HA state
+        try:
+            await hass.services.async_call(
+                "select",
+                "select_option",
+                {
+                    "entity_id": "select.active_llm_provider",
+                    "option": provider_id,
+                },
+                blocking=False,
+            )
+        except Exception:
+            pass  # Entity may not exist yet; runtime_settings still updated
+
+        model_used = target.get("model", "")
+        _LOGGER.info("Active LLM switched to %s (model=%s)", provider_id, model_used)
+        return self.json({
+            "success": True,
+            "active": provider_id,
+            "model": model_used,
+        })
+
+
 class SettingsView(HomeAssistantView):
     """View to read and update AI settings at runtime."""
 
@@ -894,10 +1039,11 @@ class SettingsView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         """Get current AI settings."""
         from .const import (
-            CONF_AI_SERVICE, CONF_MODEL, CONF_SYSTEM_PROMPT,
+            CONF_SYSTEM_PROMPT,
             CONF_MAX_TOOL_CALLS, CONF_TEMPERATURE, CONF_MAX_TOKENS,
             CONF_MEMORY_WINDOW, CONF_ENABLE_CONVERSATION_HISTORY,
             CONF_HISTORY_RETENTION_DAYS,
+            CONF_LLM_PROVIDERS, CONF_ACTIVE_LLM_PROVIDER,
             DEFAULT_SYSTEM_PROMPT, DEFAULT_MAX_TOOL_CALLS,
             DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_MEMORY_WINDOW,
             DEFAULT_HISTORY_RETENTION_DAYS,
@@ -912,9 +1058,21 @@ class SettingsView(HomeAssistantView):
         # Runtime overrides stored in data dict take priority
         overrides = data.get("runtime_settings", {})
 
+        # Derive ai_service and model from active provider
+        ai_service = overrides.get("ai_service", "")
+        model = overrides.get("model", "")
+        if not ai_service:
+            # Fallback: read from active provider config
+            active_id = config.get(CONF_ACTIVE_LLM_PROVIDER, "")
+            for p in config.get(CONF_LLM_PROVIDERS, []):
+                if p.get("id") == active_id:
+                    ai_service = p.get("provider", "")
+                    model = model or p.get("model", "")
+                    break
+
         settings = {
-            "ai_service": config.get(CONF_AI_SERVICE, ""),
-            "model": overrides.get("model", config.get(CONF_MODEL, "")),
+            "ai_service": ai_service,
+            "model": model,
             "temperature": overrides.get(
                 "temperature",
                 config.get(CONF_TEMPERATURE, DEFAULT_TEMPERATURE),

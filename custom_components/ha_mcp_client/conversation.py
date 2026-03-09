@@ -116,14 +116,16 @@ class HAMCPConversationEntity(ConversationEntity):
     def _setup_ai_service(self) -> None:
         """Setup the AI service based on config."""
         config = self._config_entry.data
-        ai_service_type = config.get(CONF_AI_SERVICE)
         overrides = self._get_runtime_settings()
 
+        # Prefer runtime_settings (populated from active LLM provider)
+        ai_service_type = overrides.get("ai_service") or config.get(CONF_AI_SERVICE)
+
         service_config = {
-            "api_key": config.get(CONF_API_KEY),
-            "model": overrides.get("model", config.get(CONF_MODEL)),
-            "base_url": config.get(CONF_BASE_URL),
-            "ollama_host": config.get(CONF_OLLAMA_HOST),
+            "api_key": overrides.get("api_key") or config.get(CONF_API_KEY),
+            "model": overrides.get("model") or config.get(CONF_MODEL),
+            "base_url": overrides.get("base_url") or config.get(CONF_BASE_URL),
+            "ollama_host": overrides.get("base_url") or config.get(CONF_OLLAMA_HOST),
             "temperature": overrides.get("temperature", config.get("temperature")),
             "max_tokens": overrides.get("max_tokens", config.get("max_tokens")),
         }
@@ -149,11 +151,49 @@ class HAMCPConversationEntity(ConversationEntity):
         """Return supported features."""
         return ConversationEntityFeature.CONTROL
 
+    # Map AI service type strings to their implementation classes
+    _SERVICE_TYPE_MAP: dict[str, type] = {}
+
+    @staticmethod
+    def _get_service_type_map() -> dict[str, type]:
+        """Lazy-load the service type map."""
+        if not HAMCPConversationEntity._SERVICE_TYPE_MAP:
+            from .ai_services.anthropic import AnthropicService
+            from .ai_services.openai import OpenAIService
+            from .ai_services.ollama import OllamaService
+            from .ai_services.openai_compatible import OpenAICompatibleService
+
+            HAMCPConversationEntity._SERVICE_TYPE_MAP = {
+                AI_SERVICE_ANTHROPIC: AnthropicService,
+                AI_SERVICE_OPENAI: OpenAIService,
+                AI_SERVICE_OLLAMA: OllamaService,
+                AI_SERVICE_OPENAI_COMPATIBLE: OpenAICompatibleService,
+            }
+        return HAMCPConversationEntity._SERVICE_TYPE_MAP
+
     def _refresh_ai_service_config(self) -> None:
-        """Refresh AI service config from runtime settings (no re-init)."""
-        if not self._ai_service:
-            return
+        """Refresh AI service config from runtime settings, re-init if provider changed."""
         overrides = self._get_runtime_settings()
+        new_service_type = overrides.get("ai_service")
+
+        # Detect provider type change → full re-init
+        if new_service_type and self._ai_service:
+            type_map = self._get_service_type_map()
+            expected_cls = type_map.get(new_service_type)
+            if expected_cls and not isinstance(self._ai_service, expected_cls):
+                _LOGGER.info(
+                    "AI provider type changed to %s, re-initializing service",
+                    new_service_type,
+                )
+                self._setup_ai_service()
+                return
+
+        if not self._ai_service:
+            # Provider may have been set for the first time
+            if new_service_type:
+                self._setup_ai_service()
+            return
+
         config = self._config_entry.data
         self._ai_service.config["temperature"] = overrides.get(
             "temperature", config.get("temperature")
@@ -164,6 +204,18 @@ class HAMCPConversationEntity(ConversationEntity):
         model = overrides.get("model")
         if model and hasattr(self._ai_service, "_model"):
             self._ai_service._model = model
+        # Also update base_url for OpenAI-compatible services
+        base_url = overrides.get("base_url")
+        if base_url and hasattr(self._ai_service, "_base_url"):
+            if self._ai_service._base_url != base_url:
+                self._ai_service._base_url = base_url
+                self._ai_service._client = None  # Force client re-creation
+        # Update API key if changed
+        api_key = overrides.get("api_key")
+        if api_key and hasattr(self._ai_service, "_api_key"):
+            if self._ai_service._api_key != api_key:
+                self._ai_service._api_key = api_key
+                self._ai_service._client = None  # Force client re-creation
         reasoning_effort = overrides.get("reasoning_effort")
         if reasoning_effort:
             self._ai_service.config["reasoning_effort"] = reasoning_effort
