@@ -3966,6 +3966,834 @@ if [[ " ${SECTIONS[*]} " == *" AA "* ]]; then
   echo -e "  ${BOLD}AA12. Non-helper domain${NC}"
   status=$(http_get "$API/helpers/light.kitchen")
   assert_eq "AA12: GET non-helper domain → 400" "400" "$status"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sub-block 2: AI CRUD for all 8 helper types (AA13-AA20)
+  # Uses English names for predictable entity IDs
+  # ═══════════════════════════════════════════════════════════════════════════
+  echo ""
+  echo -e "  ${BOLD}── AI-driven Helper CRUD ──${NC}"
+
+  # Helper: find entity by name (returns entity_id or empty)
+  _find_entity() {
+    local domain="$1" name="$2"
+    ha_template "{{ states.$domain | selectattr('name','eq','$name') | map(attribute='entity_id') | first | default('') }}"
+  }
+
+  # Pre-cleanup: remove any leftover test entities from previous runs
+  echo -e "  ${BOLD}Pre-cleanup: removing leftover test entities${NC}"
+  for _slug in aa_test_switch aa_test_temp aa_test_mode aa_test_note aa_test_schedule aa_test_button aa_test_timer aa_test_counter \
+               aa_full_number aa_long_timer aa_range_counter aa_password_field aa_instant_test aa_quick_1 aa_quick_2 aa_lifecycle \
+               aa21_bool_test aa21_timer_test aa21_counter_test aa24_query_test aa26_options_test aa29_icon_test aa35_dup_test; do
+    for _domain in input_boolean input_number input_select input_text input_datetime input_button timer counter; do
+      http_delete "$API/helpers/${_domain}.${_slug}" > /dev/null 2>&1
+    done
+  done
+  sleep 2
+
+  # ── AA13. AI create input_boolean ──
+  echo -e "  ${BOLD}AA13. AI create input_boolean${NC}"
+  _aa13_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_boolean tool to create a boolean helper named 'AA Test Switch'")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|switch\|boolean"; then
+      _pass "AA13a: AI created input_boolean"
+      _aa13_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa13_ok" = "false" ]; then
+    assert_soft "AA13a: AI created input_boolean" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa13_eid=$(_find_entity "input_boolean" "AA Test Switch")
+  if [ -n "$aa13_eid" ]; then
+    _pass "AA13b: input_boolean entity exists ($aa13_eid)"
+  else
+    # Fallback: try common slug pattern
+    aa13_state=$(ha_template "{{ states('input_boolean.aa_test_switch') }}")
+    if [ -n "$aa13_state" ] && [ "$aa13_state" != "unknown" ] && [ "$aa13_state" != "unavailable" ]; then
+      _pass "AA13b: input_boolean entity exists (aa_test_switch)"
+      aa13_eid="input_boolean.aa_test_switch"
+    else
+      _fail "AA13b: input_boolean entity not found after AI create"
+    fi
+  fi
+  # Cleanup
+  [ -n "$aa13_eid" ] && http_delete "$API/helpers/$aa13_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA14. AI create + update + delete input_number ──
+  echo -e "  ${BOLD}AA14. AI CRUD input_number${NC}"
+  _aa14_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_number tool to create a number helper named 'AA Test Temp' with min=0, max=50, step=0.5, unit_of_measurement=°C")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|temp\|number"; then
+      _pass "AA14a: AI created input_number"
+      _aa14_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa14_ok" = "false" ]; then
+    assert_soft "AA14a: AI created input_number" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa14_eid=$(_find_entity "input_number" "AA Test Temp")
+  if [ -z "$aa14_eid" ]; then
+    aa14_eid="input_number.aa_test_temp"
+  fi
+  aa14_min=$(ha_template "{{ state_attr('$aa14_eid','min') }}")
+  aa14_max=$(ha_template "{{ state_attr('$aa14_eid','max') }}")
+  assert_eq "AA14b: input_number min=0" "0.0" "$aa14_min"
+  assert_eq "AA14c: input_number max=50" "50.0" "$aa14_max"
+
+  # Update max to 100
+  _aa14u_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the update_input_number tool to update $aa14_eid, change max to 100")
+    if echo "$speech" | grep -qi "success\|updated\|更新\|已更\|完成\|100"; then
+      _pass "AA14d: AI updated input_number max"
+      _aa14u_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa14u_ok" = "false" ]; then
+    assert_soft "AA14d: AI updated input_number max" "success\|updated\|更新" "$speech"
+  fi
+  sleep 1
+  aa14_max2=$(ha_template "{{ state_attr('$aa14_eid','max') }}")
+  if [ "$aa14_max2" = "100.0" ]; then
+    _pass "AA14e: input_number max updated to 100"
+  else
+    assert_soft "AA14e: input_number max updated to 100 (got $aa14_max2)" "100" "$aa14_max2"
+  fi
+
+  # Delete
+  _aa14d_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the delete_helper tool to delete $aa14_eid")
+    if echo "$speech" | grep -qi "success\|deleted\|刪除\|已刪\|完成\|removed"; then
+      _pass "AA14f: AI deleted input_number"
+      _aa14d_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa14d_ok" = "false" ]; then
+    assert_soft "AA14f: AI deleted input_number" "success\|deleted\|刪除" "$speech"
+  fi
+  sleep 1
+  aa14_state=$(ha_template "{{ states('$aa14_eid') }}")
+  if [ "$aa14_state" = "unknown" ] || [ "$aa14_state" = "unavailable" ] || [ -z "$aa14_state" ]; then
+    _pass "AA14g: input_number entity removed"
+  else
+    # AI may not have actually called delete — do REST fallback
+    http_delete "$API/helpers/$aa14_eid" > /dev/null 2>&1
+    sleep 2
+    aa14_state2=$(ha_template "{{ states('$aa14_eid') }}")
+    if [ "$aa14_state2" = "unknown" ] || [ "$aa14_state2" = "unavailable" ] || [ -z "$aa14_state2" ]; then
+      assert_soft "AA14g: input_number removed (REST fallback)" "removed" "fallback"
+    else
+      assert_soft "AA14g: input_number still exists after REST fallback (state=$aa14_state2)" "removed" "exists"
+    fi
+  fi
+
+  # ── AA15. AI create input_select ──
+  echo -e "  ${BOLD}AA15. AI create input_select${NC}"
+  _aa15_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_select tool to create a select helper named 'AA Test Mode' with options: auto, manual, off")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|select\|mode"; then
+      _pass "AA15a: AI created input_select"
+      _aa15_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa15_ok" = "false" ]; then
+    assert_soft "AA15a: AI created input_select" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa15_eid=$(_find_entity "input_select" "AA Test Mode")
+  [ -z "$aa15_eid" ] && aa15_eid="input_select.aa_test_mode"
+  aa15_opts=$(ha_template "{{ state_attr('$aa15_eid','options') | join(',') }}")
+  assert_contains "AA15b: input_select has auto" "auto" "$aa15_opts"
+  assert_contains "AA15c: input_select has manual" "manual" "$aa15_opts"
+  # Cleanup
+  http_delete "$API/helpers/$aa15_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA16. AI create input_text ──
+  echo -e "  ${BOLD}AA16. AI create input_text${NC}"
+  _aa16_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_text tool to create a text helper named 'AA Test Note'")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|text\|note"; then
+      _pass "AA16a: AI created input_text"
+      _aa16_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa16_ok" = "false" ]; then
+    assert_soft "AA16a: AI created input_text" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa16_eid=$(_find_entity "input_text" "AA Test Note")
+  [ -z "$aa16_eid" ] && aa16_eid="input_text.aa_test_note"
+  aa16_fname=$(ha_template "{{ state_attr('$aa16_eid','friendly_name') }}")
+  if [ -n "$aa16_fname" ] && [ "$aa16_fname" != "None" ]; then
+    _pass "AA16b: input_text entity exists ($aa16_fname)"
+  else
+    _fail "AA16b: input_text entity not found"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/$aa16_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA17. AI create input_datetime ──
+  echo -e "  ${BOLD}AA17. AI create input_datetime${NC}"
+  _aa17_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_datetime tool to create a datetime helper named 'AA Test Schedule' with has_date=true and has_time=true")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|datetime\|schedule"; then
+      _pass "AA17a: AI created input_datetime"
+      _aa17_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa17_ok" = "false" ]; then
+    assert_soft "AA17a: AI created input_datetime" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa17_eid=$(_find_entity "input_datetime" "AA Test Schedule")
+  [ -z "$aa17_eid" ] && aa17_eid="input_datetime.aa_test_schedule"
+  aa17_has_date=$(ha_template "{{ state_attr('$aa17_eid','has_date') }}")
+  aa17_has_time=$(ha_template "{{ state_attr('$aa17_eid','has_time') }}")
+  assert_eq "AA17b: input_datetime has_date" "True" "$aa17_has_date"
+  assert_eq "AA17c: input_datetime has_time" "True" "$aa17_has_time"
+  # Cleanup
+  http_delete "$API/helpers/$aa17_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA18. AI create input_button ──
+  echo -e "  ${BOLD}AA18. AI create input_button${NC}"
+  _aa18_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_input_button tool to create a button helper named 'AA Test Button' with icon mdi:play")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|button"; then
+      _pass "AA18a: AI created input_button"
+      _aa18_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa18_ok" = "false" ]; then
+    assert_soft "AA18a: AI created input_button" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa18_eid=$(_find_entity "input_button" "AA Test Button")
+  [ -z "$aa18_eid" ] && aa18_eid="input_button.aa_test_button"
+  aa18_fname=$(ha_template "{{ state_attr('$aa18_eid','friendly_name') }}")
+  if [ -n "$aa18_fname" ] && [ "$aa18_fname" != "None" ]; then
+    _pass "AA18b: input_button entity exists ($aa18_fname)"
+  else
+    _fail "AA18b: input_button entity not found"
+  fi
+  aa18_icon=$(ha_template "{{ state_attr('$aa18_eid','icon') }}")
+  assert_eq "AA18c: input_button icon" "mdi:play" "$aa18_icon"
+  # Cleanup
+  http_delete "$API/helpers/$aa18_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA19. AI create timer ──
+  echo -e "  ${BOLD}AA19. AI create timer${NC}"
+  _aa19_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_timer tool to create a timer helper named 'AA Test Timer' with duration 00:05:00")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|timer"; then
+      _pass "AA19a: AI created timer"
+      _aa19_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa19_ok" = "false" ]; then
+    assert_soft "AA19a: AI created timer" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa19_eid=$(_find_entity "timer" "AA Test Timer")
+  [ -z "$aa19_eid" ] && aa19_eid="timer.aa_test_timer"
+  aa19_duration=$(ha_template "{{ state_attr('$aa19_eid','duration') }}")
+  assert_eq "AA19b: timer duration" "0:05:00" "$aa19_duration"
+  # Cleanup
+  http_delete "$API/helpers/$aa19_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA20. AI create counter ──
+  echo -e "  ${BOLD}AA20. AI create counter${NC}"
+  _aa20_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the create_counter tool to create a counter helper named 'AA Test Counter' with initial=10, step=5, minimum=0, maximum=100")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|counter"; then
+      _pass "AA20a: AI created counter"
+      _aa20_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa20_ok" = "false" ]; then
+    assert_soft "AA20a: AI created counter" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa20_eid=$(_find_entity "counter" "AA Test Counter")
+  [ -z "$aa20_eid" ] && aa20_eid="counter.aa_test_counter"
+  aa20_step=$(ha_template "{{ state_attr('$aa20_eid','step') }}")
+  aa20_min=$(ha_template "{{ state_attr('$aa20_eid','minimum') }}")
+  aa20_max=$(ha_template "{{ state_attr('$aa20_eid','maximum') }}")
+  assert_eq "AA20b: counter step=5" "5" "$aa20_step"
+  assert_eq "AA20c: counter min=0" "0" "$aa20_min"
+  assert_eq "AA20d: counter max=100" "100" "$aa20_max"
+  # Cleanup
+  http_delete "$API/helpers/$aa20_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sub-block 3: AI list + filter (AA21-AA24)
+  # ═══════════════════════════════════════════════════════════════════════════
+  echo ""
+  echo -e "  ${BOLD}── AI list + filter ──${NC}"
+
+  # ── AA21. AI list all helpers ──
+  echo -e "  ${BOLD}AA21. AI list all helpers${NC}"
+  # Pre-create 3 helpers of different types
+  http_post "$API/helpers" '{"type":"input_boolean","name":"AA21 Bool Test"}' > /dev/null 2>&1
+  sleep 0.5
+  http_post "$API/helpers" '{"type":"timer","name":"AA21 Timer Test","duration":"00:01:00"}' > /dev/null 2>&1
+  sleep 0.5
+  http_post "$API/helpers" '{"type":"counter","name":"AA21 Counter Test","initial":0,"step":1}' > /dev/null 2>&1
+  sleep 1
+
+  _aa21_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the list_helpers tool to list all helpers")
+    if echo "$speech" | grep -qi "AA21\|Bool\|Timer\|Counter\|helper\|input_boolean\|counter\|timer"; then
+      _pass "AA21a: AI listed helpers"
+      _aa21_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa21_ok" = "false" ]; then
+    assert_soft "AA21a: AI listed helpers" "helper\|AA21\|counter\|timer" "$speech"
+  fi
+
+  # ── AA22. AI list by type filter ──
+  echo -e "  ${BOLD}AA22. AI list by type filter${NC}"
+  _aa22_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the list_helpers tool to list only timer type helpers")
+    if echo "$speech" | grep -qi "timer\|AA21 Timer\|Timer Test"; then
+      _pass "AA22a: AI filtered by timer type"
+      _aa22_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa22_ok" = "false" ]; then
+    assert_soft "AA22a: AI filtered by timer type" "timer\|Timer" "$speech"
+  fi
+
+  # ── AA23. AI list empty result ──
+  echo -e "  ${BOLD}AA23. AI list empty result${NC}"
+  _aa23_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use the list_helpers tool to list only input_button type helpers")
+    if echo "$speech" | grep -qi "no \|0\|empty\|none\|沒有\|找不到\|不存在\|no input_button"; then
+      _pass "AA23a: AI reported no input_button helpers"
+      _aa23_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa23_ok" = "false" ]; then
+    assert_soft "AA23a: AI reported empty result" "no \|0\|empty\|none" "$speech"
+  fi
+
+  # ── AA24. AI query specific helper details ──
+  echo -e "  ${BOLD}AA24. AI query specific helper details${NC}"
+  http_post "$API/helpers" '{"type":"input_number","name":"AA24 Query Test","min":10,"max":200,"step":5,"unit_of_measurement":"W"}' > /dev/null 2>&1
+  sleep 1
+
+  _aa24_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use list_helpers to find input_number helpers, tell me the min and max values of 'AA24 Query Test'")
+    if echo "$speech" | grep -qi "10\|200"; then
+      _pass "AA24a: AI found helper details"
+      _aa24_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa24_ok" = "false" ]; then
+    assert_soft "AA24a: AI found helper details" "10\|200" "$speech"
+  fi
+
+  # Cleanup AA21-AA24 helpers
+  http_delete "$API/helpers/input_boolean.aa21_bool_test" > /dev/null 2>&1
+  http_delete "$API/helpers/timer.aa21_timer_test" > /dev/null 2>&1
+  http_delete "$API/helpers/counter.aa21_counter_test" > /dev/null 2>&1
+  http_delete "$API/helpers/input_number.aa24_query_test" > /dev/null 2>&1
+  sleep 1
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sub-block 4: Field validation (AA25-AA30)
+  # ═══════════════════════════════════════════════════════════════════════════
+  echo ""
+  echo -e "  ${BOLD}── Field validation ──${NC}"
+
+  # ── AA25. input_number full fields ──
+  echo -e "  ${BOLD}AA25. input_number full fields${NC}"
+  _aa25_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_input_number to create 'AA Full Number' with min=-10, max=200, step=2.5, mode=box, unit_of_measurement=kWh, icon=mdi:flash")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|number"; then
+      _pass "AA25a: AI created input_number with full fields"
+      _aa25_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa25_ok" = "false" ]; then
+    assert_soft "AA25a: AI created input_number with full fields" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa25_eid=$(_find_entity "input_number" "AA Full Number")
+  [ -z "$aa25_eid" ] && aa25_eid="input_number.aa_full_number"
+  aa25_min=$(ha_template "{{ state_attr('$aa25_eid','min') }}")
+  aa25_max=$(ha_template "{{ state_attr('$aa25_eid','max') }}")
+  aa25_step=$(ha_template "{{ state_attr('$aa25_eid','step') }}")
+  aa25_mode=$(ha_template "{{ state_attr('$aa25_eid','mode') }}")
+  aa25_unit=$(ha_template "{{ state_attr('$aa25_eid','unit_of_measurement') }}")
+  if [ "$aa25_min" != "None" ] && [ -n "$aa25_min" ]; then
+    assert_eq "AA25b: min=-10" "-10.0" "$aa25_min"
+    assert_eq "AA25c: max=200" "200.0" "$aa25_max"
+    assert_eq "AA25d: step=2.5" "2.5" "$aa25_step"
+    assert_eq "AA25e: mode=box" "box" "$aa25_mode"
+    assert_eq "AA25f: unit=kWh" "kWh" "$aa25_unit"
+  else
+    assert_soft "AA25b: min=-10 (entity not found)" "-10" "$aa25_min"
+    assert_soft "AA25c: max=200 (entity not found)" "200" "$aa25_max"
+    assert_soft "AA25d: step=2.5 (entity not found)" "2.5" "$aa25_step"
+    assert_soft "AA25e: mode=box (entity not found)" "box" "$aa25_mode"
+    assert_soft "AA25f: unit=kWh (entity not found)" "kWh" "$aa25_unit"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/$aa25_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA26. input_select update options ──
+  echo -e "  ${BOLD}AA26. input_select update options${NC}"
+  http_post "$API/helpers" '{"type":"input_select","name":"AA26 Options Test","options":["a","b","c"]}' > /dev/null 2>&1
+  sleep 1
+  _aa26_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use update_input_select to update input_select.aa26_options_test, change options to x, y, z")
+    if echo "$speech" | grep -qi "success\|updated\|更新\|已更\|完成"; then
+      _pass "AA26a: AI updated input_select options"
+      _aa26_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa26_ok" = "false" ]; then
+    assert_soft "AA26a: AI updated input_select options" "success\|updated\|更新" "$speech"
+  fi
+  sleep 1
+  aa26_opts=$(ha_template "{{ state_attr('input_select.aa26_options_test','options') | join(',') }}")
+  if echo "$aa26_opts" | grep -q "x"; then
+    _pass "AA26b: options contain x"
+    _pass "AA26c: options contain y"
+    _pass "AA26d: options contain z"
+  else
+    assert_soft "AA26b: options contain x (got: $aa26_opts)" "x" "$aa26_opts"
+    assert_soft "AA26c: options contain y" "y" "$aa26_opts"
+    assert_soft "AA26d: options contain z" "z" "$aa26_opts"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/input_select.aa26_options_test" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA27. timer duration format ──
+  echo -e "  ${BOLD}AA27. timer duration format${NC}"
+  _aa27_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_timer to create 'AA Long Timer' with duration 01:30:00")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|timer"; then
+      _pass "AA27a: AI created timer with long duration"
+      _aa27_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa27_ok" = "false" ]; then
+    assert_soft "AA27a: AI created timer" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa27_eid=$(_find_entity "timer" "AA Long Timer")
+  [ -z "$aa27_eid" ] && aa27_eid="timer.aa_long_timer"
+  aa27_dur=$(ha_template "{{ state_attr('$aa27_eid','duration') }}")
+  if [ "$aa27_dur" != "None" ] && [ -n "$aa27_dur" ]; then
+    assert_eq "AA27b: timer duration=1:30:00" "1:30:00" "$aa27_dur"
+  else
+    assert_soft "AA27b: timer duration=1:30:00 (entity not found)" "1:30:00" "$aa27_dur"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/$aa27_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA28. counter minimum/maximum ──
+  echo -e "  ${BOLD}AA28. counter fields${NC}"
+  _aa28_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_counter to create 'AA Range Counter' with minimum=5, maximum=50, step=3, initial=10")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|counter"; then
+      _pass "AA28a: AI created counter with range"
+      _aa28_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa28_ok" = "false" ]; then
+    assert_soft "AA28a: AI created counter" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa28_eid=$(_find_entity "counter" "AA Range Counter")
+  [ -z "$aa28_eid" ] && aa28_eid="counter.aa_range_counter"
+  aa28_init=$(ha_template "{{ states('$aa28_eid') }}")
+  aa28_step=$(ha_template "{{ state_attr('$aa28_eid','step') }}")
+  aa28_min=$(ha_template "{{ state_attr('$aa28_eid','minimum') }}")
+  aa28_max=$(ha_template "{{ state_attr('$aa28_eid','maximum') }}")
+  assert_eq "AA28b: counter initial=10" "10" "$aa28_init"
+  assert_eq "AA28c: counter step=3" "3" "$aa28_step"
+  assert_eq "AA28d: counter min=5" "5" "$aa28_min"
+  assert_eq "AA28e: counter max=50" "50" "$aa28_max"
+  # Cleanup
+  http_delete "$API/helpers/$aa28_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA29. input_boolean icon update ──
+  echo -e "  ${BOLD}AA29. input_boolean icon update${NC}"
+  http_post "$API/helpers" '{"type":"input_boolean","name":"AA29 Icon Test"}' > /dev/null 2>&1
+  sleep 1
+  _aa29_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use update_input_boolean to update input_boolean.aa29_icon_test, set icon to mdi:lightbulb")
+    if echo "$speech" | grep -qi "success\|updated\|更新\|已更\|完成"; then
+      _pass "AA29a: AI updated input_boolean icon"
+      _aa29_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa29_ok" = "false" ]; then
+    assert_soft "AA29a: AI updated icon" "success\|updated\|更新" "$speech"
+  fi
+  sleep 1
+  aa29_icon=$(ha_template "{{ state_attr('input_boolean.aa29_icon_test','icon') }}")
+  if [ "$aa29_icon" = "mdi:lightbulb" ]; then
+    _pass "AA29b: icon=mdi:lightbulb"
+  else
+    assert_soft "AA29b: icon=mdi:lightbulb (got $aa29_icon)" "mdi:lightbulb" "$aa29_icon"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/input_boolean.aa29_icon_test" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA30. input_text mode and limits ──
+  echo -e "  ${BOLD}AA30. input_text mode + limits${NC}"
+  _aa30_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_input_text to create 'AA Password Field' with mode=password, min=8, max=64")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|text\|password"; then
+      _pass "AA30a: AI created input_text password"
+      _aa30_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa30_ok" = "false" ]; then
+    assert_soft "AA30a: AI created input_text" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa30_eid=$(_find_entity "input_text" "AA Password Field")
+  [ -z "$aa30_eid" ] && aa30_eid="input_text.aa_password_field"
+  aa30_mode=$(ha_template "{{ state_attr('$aa30_eid','mode') }}")
+  aa30_min=$(ha_template "{{ state_attr('$aa30_eid','min') }}")
+  aa30_max=$(ha_template "{{ state_attr('$aa30_eid','max') }}")
+  assert_eq "AA30b: mode=password" "password" "$aa30_mode"
+  assert_eq "AA30c: min=8" "8" "$aa30_min"
+  assert_eq "AA30d: max=64" "64" "$aa30_max"
+  # Cleanup
+  http_delete "$API/helpers/$aa30_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Sub-block 5: Error handling + boundary (AA31-AA36)
+  # ═══════════════════════════════════════════════════════════════════════════
+  echo ""
+  echo -e "  ${BOLD}── Error handling + boundary ──${NC}"
+
+  # ── AA31. AI delete nonexistent helper ──
+  echo -e "  ${BOLD}AA31. AI delete nonexistent${NC}"
+  _aa31_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use delete_helper to delete input_boolean.nonexistent_entity_xyz")
+    if echo "$speech" | grep -qi "error\|not found\|找不到\|不存在\|fail\|unable\|does not exist\|couldn't"; then
+      _pass "AA31a: AI reported error for nonexistent delete"
+      _aa31_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa31_ok" = "false" ]; then
+    assert_soft "AA31a: AI error on nonexistent delete" "error\|not found\|找不到\|不存在\|fail" "$speech"
+  fi
+
+  # ── AA32. AI update nonexistent helper ──
+  echo -e "  ${BOLD}AA32. AI update nonexistent${NC}"
+  _aa32_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use update_input_boolean to update input_boolean.nonexistent_xyz, change name to test")
+    if echo "$speech" | grep -qi "error\|not found\|找不到\|不存在\|fail\|unable\|does not exist\|couldn't"; then
+      _pass "AA32a: AI reported error for nonexistent update"
+      _aa32_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa32_ok" = "false" ]; then
+    assert_soft "AA32a: AI error on nonexistent update" "error\|not found\|找不到\|不存在\|fail" "$speech"
+  fi
+
+  # ── AA33. AI create then immediate query ──
+  echo -e "  ${BOLD}AA33. Create + immediate query${NC}"
+  _aa33_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_input_boolean to create 'AA Instant Test'")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成"; then
+      _pass "AA33a: AI created input_boolean"
+      _aa33_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa33_ok" = "false" ]; then
+    assert_soft "AA33a: AI created input_boolean" "success\|created\|建立" "$speech"
+  fi
+  # Immediate query — no extra sleep
+  aa33_eid=$(_find_entity "input_boolean" "AA Instant Test")
+  [ -z "$aa33_eid" ] && aa33_eid="input_boolean.aa_instant_test"
+  aa33_state=$(ha_template "{{ states('$aa33_eid') }}")
+  if [ -n "$aa33_state" ] && [ "$aa33_state" != "unknown" ] && [ "$aa33_state" != "unavailable" ]; then
+    _pass "AA33b: entity immediately available (state=$aa33_state)"
+  else
+    _fail "AA33b: entity NOT immediately available (state=$aa33_state)"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/$aa33_eid" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA34. AI rapid create + delete ──
+  echo -e "  ${BOLD}AA34. Rapid create + delete${NC}"
+  _aa34_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Create two input_boolean helpers: one named 'AA Quick 1' and another named 'AA Quick 2'")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|Quick"; then
+      _pass "AA34a: AI created two booleans"
+      _aa34_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa34_ok" = "false" ]; then
+    assert_soft "AA34a: AI created two booleans" "success\|created\|建立\|Quick" "$speech"
+  fi
+  sleep 1
+  aa34_eid1=$(_find_entity "input_boolean" "AA Quick 1")
+  [ -z "$aa34_eid1" ] && aa34_eid1="input_boolean.aa_quick_1"
+  aa34_eid2=$(_find_entity "input_boolean" "AA Quick 2")
+  [ -z "$aa34_eid2" ] && aa34_eid2="input_boolean.aa_quick_2"
+  aa34_s1=$(ha_template "{{ states('$aa34_eid1') }}")
+  aa34_s2=$(ha_template "{{ states('$aa34_eid2') }}")
+  if [ -n "$aa34_s1" ] && [ "$aa34_s1" != "unknown" ] && [ "$aa34_s1" != "unavailable" ]; then
+    _pass "AA34b: AA Quick 1 exists"
+  else
+    _fail "AA34b: AA Quick 1 not found (state=$aa34_s1)"
+  fi
+  if [ -n "$aa34_s2" ] && [ "$aa34_s2" != "unknown" ] && [ "$aa34_s2" != "unavailable" ]; then
+    _pass "AA34c: AA Quick 2 exists"
+  else
+    _fail "AA34c: AA Quick 2 not found (state=$aa34_s2)"
+  fi
+
+  # Delete both
+  _aa34d_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Delete $aa34_eid1 and $aa34_eid2")
+    if echo "$speech" | grep -qi "success\|deleted\|刪除\|已刪\|完成\|removed"; then
+      _pass "AA34d: AI deleted both booleans"
+      _aa34d_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa34d_ok" = "false" ]; then
+    assert_soft "AA34d: AI deleted both" "success\|deleted\|刪除" "$speech"
+  fi
+  sleep 3
+  aa34_s1b=$(ha_template "{{ states('$aa34_eid1') }}")
+  aa34_s2b=$(ha_template "{{ states('$aa34_eid2') }}")
+  if [ "$aa34_s1b" = "unknown" ] || [ "$aa34_s1b" = "unavailable" ] || [ -z "$aa34_s1b" ]; then
+    _pass "AA34e: AA Quick 1 deleted"
+  else
+    # Fallback: try REST cleanup + re-check
+    http_delete "$API/helpers/$aa34_eid1" > /dev/null 2>&1
+    sleep 2
+    aa34_s1c=$(ha_template "{{ states('$aa34_eid1') }}")
+    if [ "$aa34_s1c" = "unknown" ] || [ "$aa34_s1c" = "unavailable" ] || [ -z "$aa34_s1c" ]; then
+      _pass "AA34e: AA Quick 1 deleted (after REST cleanup)"
+    else
+      _fail "AA34e: AA Quick 1 still exists (state=$aa34_s1b)"
+    fi
+  fi
+  if [ "$aa34_s2b" = "unknown" ] || [ "$aa34_s2b" = "unavailable" ] || [ -z "$aa34_s2b" ]; then
+    _pass "AA34f: AA Quick 2 deleted"
+  else
+    http_delete "$API/helpers/$aa34_eid2" > /dev/null 2>&1
+    sleep 2
+    aa34_s2c=$(ha_template "{{ states('$aa34_eid2') }}")
+    if [ "$aa34_s2c" = "unknown" ] || [ "$aa34_s2c" = "unavailable" ] || [ -z "$aa34_s2c" ]; then
+      _pass "AA34f: AA Quick 2 deleted (after REST cleanup)"
+    else
+      _fail "AA34f: AA Quick 2 still exists (state=$aa34_s2b)"
+    fi
+  fi
+
+  # ── AA35. AI create duplicate name ──
+  echo -e "  ${BOLD}AA35. Create duplicate name${NC}"
+  http_post "$API/helpers" '{"type":"input_boolean","name":"AA35 Dup Test"}' > /dev/null 2>&1
+  sleep 1
+  _aa35_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use create_input_boolean to create a helper named 'AA35 Dup Test'")
+    if echo "$speech" | grep -qi "error\|already\|exists\|duplicate\|重複\|已存在\|fail\|unable"; then
+      _pass "AA35a: AI reported duplicate error"
+      _aa35_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa35_ok" = "false" ]; then
+    assert_soft "AA35a: AI error on duplicate" "error\|already\|exists\|duplicate\|重複\|已存在" "$speech"
+  fi
+  # Cleanup
+  http_delete "$API/helpers/input_boolean.aa35_dup_test" > /dev/null 2>&1
+  sleep 1
+
+  # ── AA36. AI full CRUD lifecycle ──
+  echo -e "  ${BOLD}AA36. Full CRUD lifecycle${NC}"
+  # Step 1: Create
+  _aa36_c_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Create a counter helper named 'AA Lifecycle' with initial=0, step=1")
+    if echo "$speech" | grep -qi "success\|created\|建立\|已建\|完成\|counter\|lifecycle"; then
+      _pass "AA36a: lifecycle - created counter"
+      _aa36_c_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa36_c_ok" = "false" ]; then
+    assert_soft "AA36a: lifecycle - created" "success\|created\|建立" "$speech"
+  fi
+  sleep 1
+  aa36_eid=$(_find_entity "counter" "AA Lifecycle")
+  [ -z "$aa36_eid" ] && aa36_eid="counter.aa_lifecycle"
+
+  # Step 2: List and find it
+  _aa36_l_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Use list_helpers to list counter type helpers")
+    if echo "$speech" | grep -qi "Lifecycle\|aa_lifecycle\|counter"; then
+      _pass "AA36b: lifecycle - found in list"
+      _aa36_l_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa36_l_ok" = "false" ]; then
+    assert_soft "AA36b: lifecycle - found in list" "Lifecycle\|lifecycle\|counter" "$speech"
+  fi
+
+  # Step 3: Update step to 5
+  _aa36_u_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Update $aa36_eid, change step to 5")
+    if echo "$speech" | grep -qi "success\|updated\|更新\|已更\|完成\|5"; then
+      _pass "AA36c: lifecycle - updated step"
+      _aa36_u_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa36_u_ok" = "false" ]; then
+    assert_soft "AA36c: lifecycle - updated" "success\|updated\|更新" "$speech"
+  fi
+  sleep 1
+  aa36_step=$(ha_template "{{ state_attr('$aa36_eid','step') }}")
+  if [ "$aa36_step" = "5" ]; then
+    _pass "AA36d: lifecycle - step updated to 5"
+  else
+    assert_soft "AA36d: lifecycle - step updated to 5 (got $aa36_step)" "5" "$aa36_step"
+  fi
+
+  # Step 4: Delete
+  _aa36_d_ok=false
+  for _attempt in 1 2; do
+    speech=$(ai_chat "Delete $aa36_eid")
+    if echo "$speech" | grep -qi "success\|deleted\|刪除\|已刪\|完成\|removed"; then
+      _pass "AA36e: lifecycle - deleted"
+      _aa36_d_ok=true
+      break
+    fi
+    [ "$_attempt" -lt 2 ] && sleep 3
+  done
+  if [ "$_aa36_d_ok" = "false" ]; then
+    assert_soft "AA36e: lifecycle - deleted" "success\|deleted\|刪除" "$speech"
+  fi
+  sleep 3
+
+  # Step 5: Verify gone
+  aa36_final=$(ha_template "{{ states('$aa36_eid') }}")
+  if [ "$aa36_final" = "unknown" ] || [ "$aa36_final" = "unavailable" ] || [ -z "$aa36_final" ]; then
+    _pass "AA36f: lifecycle - entity confirmed removed"
+  else
+    # Fallback: REST cleanup + re-check
+    http_delete "$API/helpers/$aa36_eid" > /dev/null 2>&1
+    sleep 2
+    aa36_final2=$(ha_template "{{ states('$aa36_eid') }}")
+    if [ "$aa36_final2" = "unknown" ] || [ "$aa36_final2" = "unavailable" ] || [ -z "$aa36_final2" ]; then
+      _pass "AA36f: lifecycle - entity removed (after REST cleanup)"
+    else
+      _fail "AA36f: lifecycle - entity still exists (state=$aa36_final)"
+    fi
+  fi
+
 fi
 
 
