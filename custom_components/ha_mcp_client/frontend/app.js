@@ -40,6 +40,148 @@
     AUTH_TOKEN = localStorage.getItem("ha_token") || "";
   }
 
+  // ── ThemeSync — follow HA dark/light theme ─────────────
+  const ThemeSync = {
+    /** CSS variables to copy from parent HA into iframe */
+    HA_VARS: [
+      "--primary-color",
+      "--primary-text-color",
+      "--secondary-text-color",
+      "--text-primary-color",
+      "--card-background-color",
+      "--sidebar-background-color",
+      "--divider-color",
+      "--error-color",
+      "--success-color",
+    ],
+
+    _prevDark: null,
+
+    /** Bootstrap: sync once + start MutationObserver */
+    init: function () {
+      this._syncTheme();
+      this._observeParent();
+    },
+
+    /** Read HA CSS vars + darkMode from parent and apply to iframe */
+    _syncTheme: function () {
+      try {
+        var parentDoc = window.parent && window.parent.document;
+        if (!parentDoc) return;
+
+        var parentStyle = window.parent.getComputedStyle(
+          parentDoc.documentElement
+        );
+
+        // Copy HA core CSS variables
+        var root = document.documentElement;
+        for (var i = 0; i < this.HA_VARS.length; i++) {
+          var val = parentStyle.getPropertyValue(this.HA_VARS[i]).trim();
+          if (val) {
+            root.style.setProperty(this.HA_VARS[i], val);
+          }
+        }
+
+        // Also copy --rgb-primary-color if available
+        var rgbPrimary = parentStyle
+          .getPropertyValue("--rgb-primary-color")
+          .trim();
+        if (rgbPrimary) {
+          root.style.setProperty("--rgb-primary-color", rgbPrimary);
+        }
+
+        // Determine dark/light mode
+        var isDark = false;
+        var haEl = parentDoc.querySelector("home-assistant");
+        if (haEl && haEl.hass && haEl.hass.themes) {
+          isDark = !!haEl.hass.themes.darkMode;
+        } else {
+          // Fallback: check if card-background-color is dark
+          var bg = parentStyle
+            .getPropertyValue("--card-background-color")
+            .trim();
+          if (bg) {
+            isDark = this._isColorDark(bg);
+          }
+        }
+
+        root.setAttribute("data-theme", isDark ? "dark" : "light");
+
+        if (this._prevDark !== isDark) {
+          this._prevDark = isDark;
+          // Update color-scheme for native elements (select, scrollbar)
+          root.style.colorScheme = isDark ? "dark" : "light";
+        }
+      } catch (e) {
+        // cross-origin or unavailable — keep default light theme
+      }
+    },
+
+    /** MutationObserver on parent <html> style changes */
+    _observeParent: function () {
+      var self = this;
+      try {
+        var parentHtml =
+          window.parent &&
+          window.parent.document &&
+          window.parent.document.documentElement;
+        if (!parentHtml) return;
+
+        var observer = new MutationObserver(function () {
+          self._syncTheme();
+        });
+        observer.observe(parentHtml, {
+          attributes: true,
+          attributeFilter: ["style", "class"],
+        });
+
+        // Also observe <home-assistant> for theme attribute changes
+        var haEl =
+          window.parent.document.querySelector("home-assistant");
+        if (haEl) {
+          var haObserver = new MutationObserver(function () {
+            self._syncTheme();
+          });
+          haObserver.observe(haEl, {
+            attributes: true,
+            attributeFilter: ["style", "class"],
+          });
+        }
+      } catch (e) {
+        // cross-origin — fallback: poll every 2s
+        setInterval(function () {
+          self._syncTheme();
+        }, 2000);
+      }
+    },
+
+    /** Heuristic: is a CSS color string "dark"? */
+    _isColorDark: function (color) {
+      // Parse hex
+      var m = color.match(
+        /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i
+      );
+      if (m) {
+        var r = parseInt(m[1], 16);
+        var g = parseInt(m[2], 16);
+        var b = parseInt(m[3], 16);
+        // Relative luminance approximation
+        return r * 0.299 + g * 0.587 + b * 0.114 < 128;
+      }
+      // Parse rgb(r, g, b)
+      m = color.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+      if (m) {
+        return (
+          parseInt(m[1]) * 0.299 +
+            parseInt(m[2]) * 0.587 +
+            parseInt(m[3]) * 0.114 <
+          128
+        );
+      }
+      return false;
+    },
+  };
+
   // ── State ───────────────────────────────────────────────
   let conversations = [];
   let currentConvId = null;
@@ -1167,6 +1309,9 @@
   // ══════════════════════════════════════════════════════════
 
   function init() {
+    // ── Theme sync (follow HA dark/light) ────────────────────
+    ThemeSync.init();
+
     // ── Tab system ──────────────────────────────────────────
     initTabs();
 

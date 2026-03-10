@@ -6,6 +6,7 @@
 }
 
 :root {
+  /* ── HA-synced core (overridden by ThemeSync from parent HA) ── */
   --primary-color: #03a9f4;
   --primary-text-color: #212121;
   --secondary-text-color: #727272;
@@ -16,15 +17,76 @@
   --error-color: #db4437;
   --success-color: #0f9d58;
 
+  /* ── Panel-specific derived ── */
   --user-bubble-bg: var(--primary-color);
   --user-bubble-text: var(--text-primary-color);
   --ai-bubble-bg: var(--card-background-color);
   --ai-bubble-text: var(--primary-text-color);
   --sidebar-bg: var(--sidebar-background-color);
   --input-bg: var(--card-background-color);
+
+  /* ── Interactive / overlay ── */
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --hover-bg-strong: rgba(0, 0, 0, 0.08);
+  --ripple-bg: rgba(0, 0, 0, 0.06);
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --shadow-subtle: rgba(0, 0, 0, 0.06);
+  --shadow-medium: rgba(0, 0, 0, 0.12);
+  --shadow-dialog: rgba(0, 0, 0, 0.2);
+
+  /* ── Code / mono ── */
+  --code-bg: #f5f5f5;
+  --code-text: #333;
+
+  /* ── Toast ── */
+  --toast-bg: #333;
+  --toast-text: #fff;
+
+  /* ── Badge ── */
+  --badge-off-bg: rgba(0, 0, 0, 0.06);
+  --badge-off-text: var(--secondary-text-color);
+
+  /* ── Scrollbar ── */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-track: transparent;
+
+  /* ── Layout ── */
   --sidebar-width: 260px;
   --tab-height: 48px;
   --header-height: 48px;
+
+  /* ── Transition for theme switching ── */
+  --theme-transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease,
+                      box-shadow 0.3s ease;
+}
+
+/* ===== Dark Theme Override ===== */
+html[data-theme="dark"] {
+  --user-bubble-text: #fff;
+  --ai-bubble-bg: #2c2c2e;
+  --ai-bubble-text: #e5e5e7;
+  --sidebar-bg: var(--sidebar-background-color);
+  --input-bg: var(--card-background-color);
+
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --hover-bg-strong: rgba(255, 255, 255, 0.10);
+  --ripple-bg: rgba(255, 255, 255, 0.08);
+  --overlay-bg: rgba(0, 0, 0, 0.65);
+  --shadow-subtle: rgba(0, 0, 0, 0.2);
+  --shadow-medium: rgba(0, 0, 0, 0.3);
+  --shadow-dialog: rgba(0, 0, 0, 0.5);
+
+  --code-bg: #1c1c1e;
+  --code-text: #d1d1d6;
+
+  --toast-bg: #48484a;
+  --toast-text: #f2f2f7;
+
+  --badge-off-bg: rgba(255, 255, 255, 0.08);
+  --badge-off-text: var(--secondary-text-color);
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --scrollbar-track: transparent;
 }
 
 html, body {
@@ -35,6 +97,7 @@ html, body {
   color: var(--primary-text-color);
   background: var(--card-background-color);
   overflow: hidden;
+  transition: var(--theme-transition);
 }
 
 /* ===== App Layout ===== */
@@ -53,6 +116,7 @@ html, body {
   border-bottom: 1px solid var(--divider-color);
   flex-shrink: 0;
   overflow-x: auto;
+  transition: var(--theme-transition);
 }
 
 .tab-btn {
@@ -69,7 +133,7 @@ html, body {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
   border-bottom: 3px solid transparent;
   white-space: nowrap;
 }
@@ -78,7 +142,7 @@ html, body {
 
 .tab-btn:hover {
   color: var(--primary-text-color);
-  background: rgba(0,0,0,0.03);
+  background: var(--hover-bg);
 }
 
 .tab-btn.active {
@@ -114,7 +178,7 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: transform 0.2s ease;
+  transition: transform 0.2s ease, background 0.3s ease, border-color 0.3s ease;
 }
 
 .sidebar-header {
@@ -138,6 +202,7 @@ html, body {
   color: var(--primary-text-color);
   font-size: 13px;
   outline: none;
+  transition: var(--theme-transition);
 }
 
 .sidebar-search input:focus {
@@ -162,7 +227,7 @@ html, body {
 }
 
 .conversation-item:hover {
-  background: rgba(0,0,0,0.05);
+  background: var(--hover-bg);
 }
 
 .conversation-item.active {
@@ -213,6 +278,7 @@ html, body {
   border-bottom: 1px solid var(--divider-color);
   background: var(--card-background-color);
   flex-shrink: 0;
+  transition: var(--theme-transition);
 }
 
 .chat-title {
@@ -286,6 +352,7 @@ html, body {
   line-height: 1.5;
   word-break: break-word;
   white-space: pre-wrap;
+  transition: var(--theme-transition);
 }
 
 .message.user .message-bubble {
@@ -330,13 +397,15 @@ html, body {
   display: none;
   margin-top: 4px;
   padding: 6px;
-  background: rgba(0,0,0,0.04);
+  background: var(--code-bg);
+  color: var(--code-text);
   border-radius: 6px;
   font-size: 11px;
   font-family: monospace;
   white-space: pre-wrap;
   max-height: 180px;
   overflow-y: auto;
+  transition: var(--theme-transition);
 }
 
 .tool-details.open { display: block; }
@@ -372,6 +441,7 @@ html, body {
   border-top: 1px solid var(--divider-color);
   background: var(--card-background-color);
   flex-shrink: 0;
+  transition: var(--theme-transition);
 }
 
 .model-selector {
@@ -390,6 +460,7 @@ html, body {
   font-size: 12px;
   cursor: pointer;
   outline: none;
+  transition: var(--theme-transition);
 }
 
 .model-selector select:focus {
@@ -406,6 +477,7 @@ html, body {
   padding: 6px 6px 6px 14px;
   max-width: 800px;
   margin: 0 auto;
+  transition: var(--theme-transition);
 }
 
 .input-wrapper:focus-within {
@@ -478,7 +550,7 @@ html, body {
 }
 
 .sub-tab:hover {
-  background: rgba(0,0,0,0.04);
+  background: var(--hover-bg);
 }
 
 .sub-tab.active {
@@ -502,6 +574,7 @@ html, body {
   resize: vertical;
   outline: none;
   tab-size: 2;
+  transition: var(--theme-transition);
 }
 
 .mono-editor:focus {
@@ -548,11 +621,11 @@ html, body {
   border: 1px solid var(--divider-color);
   border-radius: 10px;
   background: var(--card-background-color);
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.15s, background 0.3s ease, border-color 0.3s ease;
 }
 
 .card-item:hover, .card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
 .card-info, .card-body {
@@ -595,8 +668,8 @@ html, body {
 }
 
 .card-badge.off {
-  background: rgba(0,0,0,0.06);
-  color: var(--secondary-text-color);
+  background: var(--badge-off-bg);
+  color: var(--badge-off-text);
 }
 
 .card-tag {
@@ -621,6 +694,7 @@ html, body {
   border: 1px solid var(--primary-color);
   border-radius: 10px;
   background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.03);
+  transition: var(--theme-transition);
 }
 
 .editor-header {
@@ -638,6 +712,7 @@ html, body {
   background: var(--input-bg);
   color: var(--primary-text-color);
   outline: none;
+  transition: var(--theme-transition);
 }
 
 .editor-header input:focus {
@@ -676,6 +751,7 @@ html, body {
   background: var(--input-bg);
   color: var(--primary-text-color);
   outline: none;
+  transition: var(--theme-transition);
 }
 
 .form-grid input:focus,
@@ -786,9 +862,10 @@ html, body {
   border-radius: 8px;
   font-size: 13px;
   cursor: pointer;
+  transition: background 0.15s;
 }
 
-.btn-secondary:hover { background: rgba(0,0,0,0.05); }
+.btn-secondary:hover { background: var(--hover-bg); }
 
 .btn-icon {
   display: inline-flex;
@@ -805,7 +882,7 @@ html, body {
   transition: background 0.15s;
 }
 
-.btn-icon:hover { background: rgba(0,0,0,0.08); }
+.btn-icon:hover { background: var(--hover-bg-strong); }
 
 .btn-send {
   display: inline-flex;
@@ -832,7 +909,7 @@ html, body {
 .dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -845,7 +922,8 @@ html, body {
   padding: 20px;
   width: 90%;
   max-width: 380px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.2);
+  box-shadow: 0 8px 28px var(--shadow-dialog);
+  transition: var(--theme-transition);
 }
 
 .dialog h3 {
@@ -869,6 +947,7 @@ html, body {
   background: var(--input-bg);
   color: var(--primary-text-color);
   outline: none;
+  transition: var(--theme-transition);
 }
 
 .dialog input:focus { border-color: var(--primary-color); }
@@ -886,8 +965,8 @@ html, body {
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 18px;
-  background: #333;
-  color: #fff;
+  background: var(--toast-bg);
+  color: var(--toast-text);
   border-radius: 8px;
   font-size: 13px;
   z-index: 200;
@@ -964,12 +1043,12 @@ html, body {
 .message-list::-webkit-scrollbar-thumb,
 .conversation-list::-webkit-scrollbar-thumb,
 .manage-content::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 .message-list::-webkit-scrollbar-track,
 .conversation-list::-webkit-scrollbar-track,
 .manage-content::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scrollbar-track);
 }
