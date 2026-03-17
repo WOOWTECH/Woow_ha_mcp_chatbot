@@ -1,12 +1,12 @@
 {
   "domain": "ha_mcp_client",
   "name": "HA MCP Client",
-  "codeowners": ["@your-username"],
+  "codeowners": ["@WOOWTECH"],
   "config_flow": true,
   "dependencies": ["conversation", "recorder", "http", "frontend"],
-  "documentation": "https://github.com/your-username/ha-mcp-client",
+  "documentation": "https://github.com/WOOWTECH/Woow_ha_mcp_chatbot",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/your-username/ha-mcp-client/issues",
+  "issue_tracker": "https://github.com/WOOWTECH/Woow_ha_mcp_chatbot/issues",
   "requirements": [
     "anthropic>=0.40.0",
     "openai>=1.50.0",
