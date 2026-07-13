@@ -30,6 +30,19 @@ _LOGGER = logging.getLogger(__name__)
 Base = declarative_base()
 
 
+def _utc_iso(dt: datetime) -> str:
+    """Format a datetime as ISO 8601 with 'Z' suffix.
+
+    SQLAlchemy's DateTime column strips tzinfo, so naive datetimes from the DB
+    are actually UTC.  Appending 'Z' tells JavaScript's ``new Date()`` to parse
+    them as UTC instead of local time.
+    """
+    s = dt.isoformat()
+    if not s.endswith(("Z", "+00:00")):
+        s += "Z"
+    return s
+
+
 class ConversationMessage(Base):
     """Model for conversation messages."""
 
@@ -168,8 +181,8 @@ class ConversationRecorder:
                     {
                         "id": r.id,
                         "title": r.title,
-                        "created_at": r.created_at.isoformat(),
-                        "updated_at": r.updated_at.isoformat(),
+                        "created_at": _utc_iso(r.created_at),
+                        "updated_at": _utc_iso(r.updated_at),
                     }
                     for r in rows
                 ]
@@ -204,8 +217,8 @@ class ConversationRecorder:
             return {
                 "id": conversation_id,
                 "title": title,
-                "created_at": now.isoformat(),
-                "updated_at": now.isoformat(),
+                "created_at": _utc_iso(now),
+                "updated_at": _utc_iso(now),
             }
         except Exception as e:
             _LOGGER.error("Error creating conversation: %s", e)
@@ -285,8 +298,8 @@ class ConversationRecorder:
                 return {
                     "id": conv.id,
                     "title": conv.title,
-                    "created_at": conv.created_at.isoformat(),
-                    "updated_at": conv.updated_at.isoformat(),
+                    "created_at": _utc_iso(conv.created_at),
+                    "updated_at": _utc_iso(conv.updated_at),
                     "is_archived": conv.is_archived,
                 }
 
@@ -317,7 +330,7 @@ class ConversationRecorder:
                         "id": msg.id,
                         "role": msg.role,
                         "content": msg.content,
-                        "timestamp": msg.timestamp.isoformat(),
+                        "timestamp": _utc_iso(msg.timestamp),
                     }
                     for msg in query.all()
                 ]
@@ -371,7 +384,7 @@ class ConversationRecorder:
                 return [
                     {
                         "conversation_id": m.conversation_id,
-                        "timestamp": m.timestamp.isoformat(),
+                        "timestamp": _utc_iso(m.timestamp),
                         "role": m.role,
                         "content": m.content,
                     }
