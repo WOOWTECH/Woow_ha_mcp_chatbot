@@ -1052,3 +1052,18 @@ html, body {
 .manage-content::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
 }
+
+/* ── Streaming cursor animation ── */
+.message-bubble.streaming::after {
+  content: "\u258b";
+  animation: blink 0.7s step-end infinite;
+  margin-left: 1px;
+  color: var(--primary-color);
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+.message-bubble.streaming:empty::before {
+  content: "\u2026";
+  color: var(--secondary-text-color);
+}

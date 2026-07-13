@@ -2,48 +2,40 @@
   "config": {
     "step": {
       "user": {
-        "title": "HA MCP Client Setup",
-        "description": "Configure your HA MCP Client integration",
+        "title": "n8n Connection",
+        "description": "Enter n8n base URL and optional API key for auto-discovery of Chat Trigger workflows",
         "data": {
-          "enable_mcp_server": "Enable MCP Server (expose tools to external AI clients)",
-          "enable_conversation": "Enable Conversation Entity (built-in AI chatbot)"
+          "n8n_base_url": "n8n Base URL",
+          "n8n_api_key": "n8n API Key (read-only, optional)"
         }
       },
-      "mcp_server": {
-        "title": "MCP Server Configuration",
-        "description": "Configure the MCP SSE server for external AI clients",
+      "select_workflow": {
+        "title": "Select Chat Workflow",
+        "description": "Detected workflows with Chat Trigger nodes:",
         "data": {
-          "mcp_server_port": "SSE Server Port"
+          "workflow": "Workflow"
         }
       },
-      "ai_service": {
-        "title": "AI Service Configuration",
-        "description": "Select and configure your first AI service provider",
+      "webhook": {
+        "title": "Webhook Path",
+        "description": "Enter the production webhook path from the Chat Trigger node (e.g. webhook/xxxx/chat)",
         "data": {
-          "ai_service": "AI Service Provider",
-          "api_key": "API Key",
-          "model": "Model",
-          "base_url": "Base URL (for OpenAI compatible services)",
-          "ollama_host": "Ollama Host URL"
+          "n8n_webhook_path": "Webhook Path"
         }
       },
-      "conversation_settings": {
-        "title": "Conversation Settings",
-        "description": "Configure conversation behavior and history",
+      "auth": {
+        "title": "Webhook Authentication",
+        "description": "Enter Basic Auth credentials configured on the Chat Trigger node",
         "data": {
-          "enable_conversation_history": "Enable conversation history",
-          "history_retention_days": "History retention (days)",
-          "system_prompt": "System prompt (customize AI behavior)",
-          "max_tool_calls": "Maximum tool calls per message"
+          "n8n_basic_user": "Username",
+          "n8n_basic_pass": "Password"
         }
       }
     },
     "error": {
-      "invalid_api_key": "Invalid API key. Please check and try again.",
-      "connection_failed": "Failed to connect to the AI service.",
-      "invalid_port": "Invalid port number. Must be between 1024 and 65535.",
-      "ollama_not_reachable": "Cannot reach Ollama server at the specified host.",
-      "no_features_selected": "Please enable at least one feature."
+      "no_chat_workflows": "No active workflows with Chat Trigger found",
+      "auth_required": "Username and password are both required",
+      "webhook_unreachable": "Cannot reach webhook endpoint, check URL and credentials"
     },
     "abort": {
       "already_configured": "HA MCP Client is already configured."
@@ -53,56 +45,14 @@
     "step": {
       "init": {
         "title": "HA MCP Client Settings",
-        "description": "Select a category below to modify settings:",
+        "description": "Update n8n connection and conversation history options",
         "data": {
-          "menu_option": "Configuration Category"
-        }
-      },
-      "manage_llm": {
-        "title": "Manage LLM Providers",
-        "description": "Select a provider to edit, or add a new one",
-        "data": {
-          "provider_action": "LLM Provider"
-        }
-      },
-      "add_llm": {
-        "title": "Add LLM Provider",
-        "description": "Configure a new LLM provider",
-        "data": {
-          "name": "Display Name",
-          "provider": "Provider Type",
-          "api_key": "API Key",
-          "model": "Model",
-          "base_url": "Base URL (for Ollama / OpenAI Compatible)"
-        }
-      },
-      "edit_llm": {
-        "title": "Edit LLM Provider",
-        "description": "Editing: {provider_name}\nAPI Key: {api_key_masked}\nActive: {is_active}",
-        "data": {
-          "name": "Display Name",
-          "provider": "Provider Type",
-          "api_key": "API Key (leave empty to keep current)",
-          "model": "Model",
-          "base_url": "Base URL",
-          "set_active": "Set as active provider",
-          "delete_provider": "Delete this provider"
-        }
-      },
-      "conversation_settings": {
-        "title": "Conversation Settings",
-        "description": "Configure conversation history and retention",
-        "data": {
+          "n8n_base_url": "n8n Base URL",
+          "n8n_webhook_path": "Webhook Path",
+          "n8n_basic_user": "Username",
+          "n8n_basic_pass": "Password (leave empty to keep current)",
           "enable_conversation_history": "Enable conversation history",
           "history_retention_days": "History retention (days)"
-        }
-      },
-      "advanced": {
-        "title": "Advanced Settings",
-        "description": "Configure advanced options",
-        "data": {
-          "system_prompt": "System prompt (customize AI behavior)",
-          "max_tool_calls": "Maximum tool calls per message"
         }
       }
     }
@@ -120,7 +70,7 @@
     },
     "export_conversation_history": {
       "name": "Export Conversation History",
-      "description": "Export conversation history to a file",
+      "description": "Export conversation history",
       "fields": {
         "user_id": {
           "name": "User ID",
@@ -130,13 +80,6 @@
           "name": "Format",
           "description": "Export format (json or markdown)"
         }
-      }
-    }
-  },
-  "entity": {
-    "conversation": {
-      "ha_mcp_client": {
-        "name": "HA MCP Assistant"
       }
     }
   }

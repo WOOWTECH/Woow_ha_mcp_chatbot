@@ -2,141 +2,84 @@
   "config": {
     "step": {
       "user": {
-        "title": "HA MCP Client 設定",
-        "description": "設定你的 HA MCP Client 整合",
+        "title": "n8n \u9023\u7dda\u8a2d\u5b9a",
+        "description": "\u8f38\u5165 n8n \u57fa\u672c\u7db2\u5740\u53ca API Key\uff08\u53ef\u9078\uff0c\u7528\u65bc\u81ea\u52d5\u63a2\u7d22 Chat Trigger workflow\uff09",
         "data": {
-          "enable_mcp_server": "啟用 MCP 伺服器（提供工具給外部 AI 客戶端）",
-          "enable_conversation": "啟用對話機器人（內建 AI 聊天）"
+          "n8n_base_url": "n8n Base URL",
+          "n8n_api_key": "n8n API Key\uff08\u552f\u8b80\uff0c\u53ef\u7559\u7a7a\u624b\u52d5\u8f38\u5165\uff09"
         }
       },
-      "mcp_server": {
-        "title": "MCP 伺服器設定",
-        "description": "設定給外部 AI 客戶端使用的 MCP SSE 伺服器",
+      "select_workflow": {
+        "title": "\u9078\u64c7 Chat Workflow",
+        "description": "\u5df2\u5075\u6e2c\u5230\u4ee5\u4e0b\u6302\u6709 Chat Trigger \u7684 workflow\uff1a",
         "data": {
-          "mcp_server_port": "SSE 伺服器埠"
+          "workflow": "Workflow"
         }
       },
-      "ai_service": {
-        "title": "AI 服務設定",
-        "description": "選擇並設定你的第一組 AI 服務提供者",
+      "webhook": {
+        "title": "\u624b\u52d5\u8f38\u5165 Webhook \u8def\u5f91",
+        "description": "\u8f38\u5165 n8n Chat Trigger \u7bc0\u9ede\u7684 production webhook \u8def\u5f91\uff08\u4f8b\u5982 webhook/xxxx/chat\uff09",
         "data": {
-          "ai_service": "AI 服務提供者",
-          "api_key": "API 金鑰",
-          "model": "模型",
-          "base_url": "Base URL（用於 OpenAI 相容服務）",
-          "ollama_host": "Ollama 主機 URL"
+          "n8n_webhook_path": "Webhook \u8def\u5f91"
         }
       },
-      "conversation_settings": {
-        "title": "對話設定",
-        "description": "設定對話行為和歷史紀錄",
+      "auth": {
+        "title": "Webhook \u9a57\u8b49",
+        "description": "\u8f38\u5165 Chat Trigger \u7bc0\u9ede\u8a2d\u5b9a\u7684 Basic Auth \u5e33\u5bc6",
         "data": {
-          "enable_conversation_history": "啟用對話紀錄",
-          "history_retention_days": "紀錄保留天數",
-          "system_prompt": "系統提示詞（自訂 AI 行為）",
-          "max_tool_calls": "每則訊息最大工具呼叫次數"
+          "n8n_basic_user": "\u5e33\u865f",
+          "n8n_basic_pass": "\u5bc6\u78bc"
         }
       }
     },
     "error": {
-      "invalid_api_key": "API 金鑰無效。請檢查後重試。",
-      "connection_failed": "無法連接到 AI 服務。",
-      "invalid_port": "埠號無效。必須在 1024 到 65535 之間。",
-      "ollama_not_reachable": "無法連接到指定的 Ollama 伺服器。",
-      "no_features_selected": "請至少啟用一個功能（MCP 伺服器或對話機器人）。"
+      "no_chat_workflows": "\u627e\u4e0d\u5230\u6709 Chat Trigger \u7684\u5df2\u555f\u7528 workflow",
+      "auth_required": "\u5e33\u865f\u548c\u5bc6\u78bc\u90fd\u662f\u5fc5\u586b\u7684",
+      "webhook_unreachable": "\u7121\u6cd5\u9023\u7dda\u5230 webhook \u7aef\u9ede\uff0c\u8acb\u6aa2\u67e5\u7db2\u5740\u548c\u61d1\u8b49"
     },
     "abort": {
-      "already_configured": "HA MCP Client 已經設定過了。"
+      "already_configured": "HA MCP Client \u5df2\u7d93\u8a2d\u5b9a\u904e\u4e86"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "HA MCP Client 設定",
-        "description": "請選擇要修改的設定類別：",
+        "title": "HA MCP Client \u8a2d\u5b9a",
+        "description": "\u66f4\u65b0 n8n \u9023\u7dda\u8a2d\u5b9a\u548c\u5c0d\u8a71\u8a18\u9304\u9078\u9805",
         "data": {
-          "menu_option": "設定類別"
-        }
-      },
-      "manage_llm": {
-        "title": "管理 LLM 提供者",
-        "description": "選擇一個提供者進行編輯，或新增一個",
-        "data": {
-          "provider_action": "LLM 提供者"
-        }
-      },
-      "add_llm": {
-        "title": "新增 LLM 提供者",
-        "description": "設定新的 LLM 提供者",
-        "data": {
-          "name": "顯示名稱",
-          "provider": "提供者類型",
-          "api_key": "API 金鑰",
-          "model": "模型",
-          "base_url": "Base URL（用於 Ollama / OpenAI 相容服務）"
-        }
-      },
-      "edit_llm": {
-        "title": "編輯 LLM 提供者",
-        "description": "正在編輯：{provider_name}\nAPI 金鑰：{api_key_masked}\n使用中：{is_active}",
-        "data": {
-          "name": "顯示名稱",
-          "provider": "提供者類型",
-          "api_key": "API 金鑰（留空表示保持原有金鑰）",
-          "model": "模型",
-          "base_url": "Base URL",
-          "set_active": "設為使用中的提供者",
-          "delete_provider": "刪除此提供者"
-        }
-      },
-      "conversation_settings": {
-        "title": "對話設定",
-        "description": "設定對話紀錄和保留期限",
-        "data": {
-          "enable_conversation_history": "啟用對話紀錄",
-          "history_retention_days": "紀錄保留天數"
-        }
-      },
-      "advanced": {
-        "title": "進階設定",
-        "description": "設定進階選項",
-        "data": {
-          "system_prompt": "系統提示詞（自訂 AI 行為）",
-          "max_tool_calls": "每則訊息最大工具呼叫次數"
+          "n8n_base_url": "n8n Base URL",
+          "n8n_webhook_path": "Webhook \u8def\u5f91",
+          "n8n_basic_user": "\u5e33\u865f",
+          "n8n_basic_pass": "\u5bc6\u78bc\uff08\u7559\u7a7a\u4fdd\u7559\u73fe\u6709\uff09",
+          "enable_conversation_history": "\u555f\u7528\u5c0d\u8a71\u8a18\u9304",
+          "history_retention_days": "\u8a18\u9304\u4fdd\u7559\u5929\u6578"
         }
       }
     }
   },
   "services": {
     "clear_conversation_history": {
-      "name": "清除對話紀錄",
-      "description": "清除用戶的對話紀錄",
+      "name": "\u6e05\u9664\u5c0d\u8a71\u8a18\u9304",
+      "description": "\u6e05\u9664\u6307\u5b9a\u4f7f\u7528\u8005\u7684\u5c0d\u8a71\u8a18\u9304",
       "fields": {
         "user_id": {
-          "name": "用戶 ID",
-          "description": "Home Assistant 用戶 ID（留空表示當前用戶）"
+          "name": "\u4f7f\u7528\u8005 ID",
+          "description": "Home Assistant \u4f7f\u7528\u8005 ID\uff08\u7559\u7a7a\u70ba\u7576\u524d\u4f7f\u7528\u8005\uff09"
         }
       }
     },
     "export_conversation_history": {
-      "name": "匯出對話紀錄",
-      "description": "匯出對話紀錄到檔案",
+      "name": "\u532f\u51fa\u5c0d\u8a71\u8a18\u9304",
+      "description": "\u532f\u51fa\u5c0d\u8a71\u8a18\u9304",
       "fields": {
         "user_id": {
-          "name": "用戶 ID",
-          "description": "Home Assistant 用戶 ID（留空表示當前用戶）"
+          "name": "\u4f7f\u7528\u8005 ID",
+          "description": "Home Assistant \u4f7f\u7528\u8005 ID\uff08\u7559\u7a7a\u70ba\u7576\u524d\u4f7f\u7528\u8005\uff09"
         },
         "format": {
-          "name": "格式",
-          "description": "匯出格式（json 或 markdown）"
+          "name": "\u683c\u5f0f",
+          "description": "\u532f\u51fa\u683c\u5f0f\uff08json \u6216 markdown\uff09"
         }
-      }
-    }
-  },
-  "entity": {
-    "conversation": {
-      "ha_mcp_client": {
-        "name": "HA MCP 助理"
       }
     }
   }
