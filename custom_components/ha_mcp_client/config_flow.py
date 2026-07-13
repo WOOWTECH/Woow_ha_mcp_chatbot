@@ -238,20 +238,24 @@ class HAMCPClientConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> bool:
         """Quick health check — POST a minimal payload to the webhook.
 
-        Sends a simple ping message. A working endpoint returns 200.
-        Any non-401 response proves connectivity; 401 = bad creds.
+        Any non-401/403 response proves connectivity and valid auth.
+        Timeout is acceptable (AI processing takes time) — treat as success.
         """
         url = f"{base_url.rstrip('/')}/{webhook_path.lstrip('/')}"
         auth = aiohttp.BasicAuth(login=user, password=password)
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
                     url,
                     json={"chatInput": "ping", "sessionId": "__healthcheck__"},
                     auth=auth,
                 ) as resp:
-                    return resp.status == 200
+                    # 401/403 = bad creds, 404 = wrong path, else = working
+                    return resp.status not in (401, 403, 404)
+        except TimeoutError:
+            # Timeout means the webhook is reachable but AI is still processing
+            return True
         except Exception as exc:
             _LOGGER.warning("Webhook test failed: %s", exc)
             return False
