@@ -186,10 +186,8 @@ class ConversationMessagesView(HomeAssistantView):
 
         response_text = await send_chat(hass, message, conversation_id)
 
-        # Record to local history (display-only log, non-blocking)
-        hass.async_create_task(
-            _record_exchange(recorder, user_id, conversation_id, message, response_text)
-        )
+        # Record to local history — await to ensure persistence before responding
+        await _record_exchange(recorder, user_id, conversation_id, message, response_text)
 
         return self.json({
             "user_message": message,

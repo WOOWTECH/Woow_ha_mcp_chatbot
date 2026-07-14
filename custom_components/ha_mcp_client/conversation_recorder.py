@@ -132,10 +132,18 @@ class ConversationRecorder:
             return
 
         recorder = get_instance(self.hass)
+        if recorder.engine is None:
+            _LOGGER.warning("Recorder engine not available, message not persisted")
+            return
+
         timestamp = datetime.now(timezone.utc)
 
         def _record():
-            with Session(recorder.engine) as session:
+            engine = recorder.engine
+            if engine is None:
+                _LOGGER.warning("Recorder engine disappeared during record")
+                return
+            with Session(engine) as session:
                 if user_message:
                     session.add(
                         ConversationMessage(
