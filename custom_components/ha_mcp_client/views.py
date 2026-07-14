@@ -193,26 +193,35 @@ class ConversationMessagesView(HomeAssistantView):
             content=message,
         )
 
-        # Step 2: Call n8n (slow — 30-120s for complex tool chains)
-        # Use shield() to prevent cancellation if client disconnects
+        # Step 2: Call n8n + save AI response (shielded from cancellation)
+        # Both n8n call and recording are inside shield so they complete
+        # even if Cloudflare cuts the browser connection
         try:
             response_text = await asyncio.shield(
-                send_chat(hass, message, conversation_id)
+                _call_and_record(hass, recorder, user_id, conversation_id, message)
             )
         except asyncio.CancelledError:
-            _LOGGER.warning("Client disconnected during n8n call for %s", conversation_id)
+            _LOGGER.warning("Client disconnected for %s, n8n+record continues in background", conversation_id)
             return self.json({"user_message": message, "ai_response": "", "conversation_id": conversation_id})
-
-        # Step 3: Save AI response + update metadata (fire-and-forget — safe now)
-        hass.async_create_task(
-            _record_ai_response(recorder, user_id, conversation_id, message, response_text)
-        )
 
         return self.json({
             "user_message": message,
             "ai_response": response_text,
             "conversation_id": conversation_id,
         })
+
+
+async def _call_and_record(
+    hass: HomeAssistant,
+    recorder,
+    user_id: str,
+    conversation_id: str,
+    message: str,
+) -> str:
+    """Call n8n and record AI response — runs inside asyncio.shield()."""
+    response_text = await send_chat(hass, message, conversation_id)
+    await _record_ai_response(recorder, user_id, conversation_id, message, response_text)
+    return response_text
 
 
 async def _record_ai_response(
