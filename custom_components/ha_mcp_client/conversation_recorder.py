@@ -38,7 +38,9 @@ def _utc_iso(dt: datetime) -> str:
     them as UTC instead of local time.
     """
     s = dt.isoformat()
-    if not s.endswith(("Z", "+00:00")):
+    if s.endswith("+00:00"):
+        s = s[:-6] + "Z"
+    elif not s.endswith("Z"):
         s += "Z"
     return s
 
