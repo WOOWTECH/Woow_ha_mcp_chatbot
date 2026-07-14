@@ -171,6 +171,45 @@ class ConversationRecorder:
         except Exception as e:
             _LOGGER.error("Error recording conversation: %s", e, exc_info=True)
 
+    async def record_single(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+    ) -> None:
+        """Record a single message (user OR assistant)."""
+        if not self._enabled or not content:
+            return
+
+        recorder = get_instance(self.hass)
+        if recorder.engine is None:
+            _LOGGER.warning("Recorder engine not available")
+            return
+
+        timestamp = datetime.now(timezone.utc)
+
+        def _write():
+            engine = recorder.engine
+            if engine is None:
+                return
+            with Session(engine) as session:
+                session.add(
+                    ConversationMessage(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        timestamp=timestamp,
+                        role=role,
+                        content=content,
+                    )
+                )
+                session.commit()
+
+        try:
+            await self._run_in_executor(_write)
+        except Exception as e:
+            _LOGGER.error("Error recording %s message: %s", role, e, exc_info=True)
+
     # ── Conversation CRUD ─────────────────────────────────────
 
     async def list_conversations(self, user_id: str) -> list[dict[str, Any]]:

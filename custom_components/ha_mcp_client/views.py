@@ -1,5 +1,6 @@
 """REST API views for HA MCP Client chat panel (n8n mode)."""
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -184,10 +185,28 @@ class ConversationMessagesView(HomeAssistantView):
         if not message:
             return self.json_message("Message is required", status_code=400)
 
-        response_text = await send_chat(hass, message, conversation_id)
+        # Step 1: Save user message FIRST (survives Cloudflare timeout)
+        await recorder.record_single(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            role="user",
+            content=message,
+        )
 
-        # Record to local history — await to ensure persistence before responding
-        await _record_exchange(recorder, user_id, conversation_id, message, response_text)
+        # Step 2: Call n8n (slow — 30-120s for complex tool chains)
+        # Use shield() to prevent cancellation if client disconnects
+        try:
+            response_text = await asyncio.shield(
+                send_chat(hass, message, conversation_id)
+            )
+        except asyncio.CancelledError:
+            _LOGGER.warning("Client disconnected during n8n call for %s", conversation_id)
+            return self.json({"user_message": message, "ai_response": "", "conversation_id": conversation_id})
+
+        # Step 3: Save AI response + update metadata (fire-and-forget — safe now)
+        hass.async_create_task(
+            _record_ai_response(recorder, user_id, conversation_id, message, response_text)
+        )
 
         return self.json({
             "user_message": message,
@@ -196,21 +215,22 @@ class ConversationMessagesView(HomeAssistantView):
         })
 
 
-async def _record_exchange(
+async def _record_ai_response(
     recorder,
     user_id: str,
     conversation_id: str,
     user_message: str,
     assistant_message: str,
 ) -> None:
-    """Record user+assistant messages to local history and update conversation metadata."""
+    """Record AI response and update conversation metadata (background task)."""
     try:
-        await recorder.record_message(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            user_message=user_message,
-            assistant_message=assistant_message,
-        )
+        if assistant_message:
+            await recorder.record_single(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_message,
+            )
         # Auto-title on first message
         conv = await recorder.get_conversation(conversation_id, user_id)
         if conv and conv.get("title") == "\u65b0\u5c0d\u8a71" and user_message:
@@ -221,4 +241,4 @@ async def _record_exchange(
             )
         await recorder.touch_conversation(conversation_id)
     except Exception as exc:
-        _LOGGER.error("Failed to record exchange: %s", exc)
+        _LOGGER.error("Failed to record AI response: %s", exc)
